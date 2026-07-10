@@ -141,7 +141,7 @@ const Logo = ({ className = "w-8 h-8", showText = true }: { className?: string, 
       </div>
       {showText && (
         <div className="flex flex-col">
-          <h1 className="text-white font-black text-xl italic tracking-tighter uppercase leading-none">Leitourghia</h1>
+          <h1 className="text-white font-black text-xl italic tracking-tighter uppercase leading-none">LecApp</h1>
           <p className="text-[10px] text-accent font-bold uppercase tracking-widest mt-1">Service Paroissial</p>
         </div>
       )}
@@ -475,7 +475,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
         </div>
         <div className="flex gap-2">
           <Button 
-            onClick={() => generateGlobalStatsPDF(readers, attendance, Object.values(plannings), masses, feedbacks, currentParish?.name || "Leitourghia")}
+            onClick={() => generateGlobalStatsPDF(readers, attendance, Object.values(plannings), masses, feedbacks, currentParish?.name || "LecApp")}
             variant="secondary"
             className="p-3 md:px-4 rounded-xl text-xs gap-2"
           >
@@ -691,7 +691,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
                     (p.assignments || []).filter(a => a.readerId === reader.id).map(a => ({ ...a, massId: p.massId }))
                   );
                   const readerFeedbacks = feedbacks.filter(f => f.readerId === reader.id);
-                  generateReaderStatsPDF(reader, readerAttendance, readerAssignments, masses, readerFeedbacks, currentParish?.name || "Leitourghia");
+                  generateReaderStatsPDF(reader, readerAttendance, readerAssignments, masses, readerFeedbacks, currentParish?.name || "LecApp");
                 }}
                 variant="secondary" 
                 className="w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
@@ -864,7 +864,7 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
                       reader: assign ? readers.find(r => r.id === assign.readerId) || null : null
                     };
                   });
-                  generatePlanningPDF(selectedMass, assignmentsWithReaders, currentParish?.name || "Leitourghia");
+                  generatePlanningPDF(selectedMass, assignmentsWithReaders, currentParish?.name || "LecApp");
                 }} 
                 variant="secondary"
                 className="text-xs"
@@ -1596,9 +1596,9 @@ const ReaderStatsView = ({ readers, masses, parishId }: { readers: Reader[], mas
             className="text-xs h-10"
             onClick={() => {
               if (selectedReaderId && selectedReader) {
-                generateReaderStatsPDF(selectedReader, readerAttendance, readerAssignments, masses, feedbacks.filter(f => f.readerId === selectedReaderId), currentParish?.name || "Leitourghia");
+                generateReaderStatsPDF(selectedReader, readerAttendance, readerAssignments, masses, feedbacks.filter(f => f.readerId === selectedReaderId), currentParish?.name || "LecApp");
               } else {
-                generateGlobalStatsPDF(readers, attendance, plannings, masses, feedbacks, currentParish?.name || "Leitourghia");
+                generateGlobalStatsPDF(readers, attendance, plannings, masses, feedbacks, currentParish?.name || "LecApp");
               }
             }}
           >
@@ -2436,7 +2436,7 @@ const EstechView = () => {
       </section>
 
       <footer className="text-center py-12">
-         <p className="text-slate-600 text-xs font-medium italic">Leitourghia est une solution propulsée par ESTECH · Étienne Manama</p>
+         <p className="text-slate-600 text-xs font-medium italic">LecApp est une solution propulsée par ESTECH · Étienne Manama</p>
       </footer>
     </div>
   );
@@ -2584,7 +2584,7 @@ const LandingView = ({
         <div className="flex items-end justify-between mb-12">
           <div>
             <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">Annuaire des Paroisses</h3>
-            <p className="text-slate-500 font-medium">Découvrez les communautés utilisant Leitourghia.</p>
+            <p className="text-slate-500 font-medium">Découvrez les communautés utilisant LecApp.</p>
           </div>
           <div className="text-right">
             <span className="text-4xl font-black text-accent italic">{filteredParishes.length}</span>
