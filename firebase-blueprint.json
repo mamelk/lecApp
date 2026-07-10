@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "Parish": {
+      "title": "Parish",
+      "description": "A religious parish organization",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the parish" },
+        "city": { "type": "string", "description": "City where the parish is located" },
+        "adminId": { "type": "string", "description": "UID of the primary admin" }
+      },
+      "required": ["name", "adminId"]
+    },
+    "Reader": {
+      "title": "Reader",
+      "description": "A person who reads during masses",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "postnom": { "type": "string" },
+        "prenom": { "type": "string" },
+        "birthDay": { "type": "integer" },
+        "birthMonth": { "type": "integer" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "parishId": { "type": "string" },
+        "trainingStatus": { 
+          "type": "string", 
+          "enum": ["none", "in_progress", "completed"] 
+        },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "postnom", "prenom", "parishId", "trainingStatus"]
+    },
+    "Mass": {
+      "title": "Mass",
+      "description": "A scheduled religious service",
+      "type": "object",
+      "properties": {
+        "parishId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "title": { "type": "string" },
+        "maxReaders": { "type": "integer", "default": 4 }
+      },
+      "required": ["parishId", "date"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Tracking of reader presence for rehearsals or masses",
+      "type": "object",
+      "properties": {
+        "parishId": { "type": "string" },
+        "massId": { "type": "string" },
+        "readerId": { "type": "string" },
+        "type": { "type": "string", "enum": ["rehearsal", "mass"] },
+        "status": { "type": "string", "enum": ["present", "late", "absent"] },
+        "arrivalTime": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parishId", "readerId", "status", "type"]
+    },
+    "Planning": {
+      "title": "Planning",
+      "description": "Reader assignments for a specific mass",
+      "type": "object",
+      "properties": {
+        "parishId": { "type": "string" },
+        "massId": { "type": "string" },
+        "assignments": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "readerId": { "type": "string" },
+              "role": { "type": "string", "enum": ["commentator", "reading1", "reading2", "universal_prayer"] }
+            }
+          } 
+        },
+        "isFinalized": { "type": "boolean" }
+      },
+      "required": ["parishId", "massId", "assignments"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "A scheduled general meeting or rehearsal",
+      "type": "object",
+      "properties": {
+        "parishId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "location": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["parishId", "title", "date"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Critique or feedback for a reader service",
+      "type": "object",
+      "properties": {
+        "parishId": { "type": "string" },
+        "massId": { "type": "string" },
+        "readerId": { "type": "string" },
+        "comment": { "type": "string" },
+        "rating": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parishId", "massId", "readerId", "comment"]
+    }
+  },
+  "firestore": {
+    "parishes": { "schema": "Parish", "description": "Collection of parishes" },
+    "readers": { "schema": "Reader", "description": "Collection of readers across all parishes" },
+    "masses": { "schema": "Mass", "description": "Collection of masses" },
+    "attendance": { "schema": "Attendance", "description": "Collection of attendance records" },
+    "plannings": { "schema": "Planning", "description": "Assignment records" },
+    "meetings": { "schema": "Meeting", "description": "Collection of meetings" },
+    "feedbacks": { "schema": "Feedback", "description": "Reader feedback records" }
+  }
+}

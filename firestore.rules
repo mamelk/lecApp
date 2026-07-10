@@ -1,0 +1,167 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Global Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { 
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/global_admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'mamelkmanama@gmail.com'
+      ); 
+    }
+    function isParishAdmin(parishId) { 
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/parishes/$(parishId)/admins/$(request.auth.uid)) ||
+        get(/databases/$(database)/documents/parishes/$(parishId)).data.adminId == request.auth.uid
+      ); 
+    }
+    function isAnyAdmin(parishId) {
+      return isAdmin() || isParishAdmin(parishId);
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // 1. Entities Validation
+    function isValidParish(data) {
+      return data.keys().hasAll(['name', 'adminId', 'password']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.adminId == request.auth.uid &&
+             data.password is string && data.password.size() <= 128;
+    }
+
+    function isValidReader(data) {
+      return data.keys().hasAll(['name', 'postnom', 'prenom', 'parishId', 'trainingStatus', 'isActive', 'roles', 'createdAt']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.postnom is string && data.postnom.size() <= 100 &&
+             data.prenom is string && data.prenom.size() <= 100 &&
+             isValidId(data.parishId) &&
+             data.trainingStatus in ['none', 'in_progress', 'completed'] &&
+             data.isActive is bool &&
+             data.roles is list &&
+             (data.email == null || (data.email is string && data.email.size() <= 128)) &&
+             (data.phone == null || (data.phone is string && data.phone.size() <= 50)) &&
+             (data.address == null || (data.address is string && data.address.size() <= 300)) &&
+             (data.birthDay == null || data.birthDay is int) &&
+             (data.birthMonth == null || data.birthMonth is int);
+    }
+
+    function isValidMass(data) {
+      return data.keys().hasAll(['parishId', 'date', 'title']) &&
+             isValidId(data.parishId) &&
+             data.date is string &&
+             data.title is string && data.title.size() <= 200 &&
+             (!data.keys().contains('fileData') || data.fileData is string) &&
+             (!data.keys().contains('fileName') || data.fileName is string) &&
+             (!data.keys().contains('fileType') || data.fileType is string);
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['parishId', 'readerId', 'massId', 'status', 'type']) &&
+             isValidId(data.parishId) &&
+             isValidId(data.readerId) &&
+             isValidId(data.massId) &&
+             data.status in ['present', 'late', 'absent'] &&
+             data.type in ['rehearsal', 'mass'];
+    }
+
+    function isValidPlanning(data) {
+      return data.keys().hasAll(['parishId', 'massId', 'assignments']) &&
+             isValidId(data.parishId) &&
+             isValidId(data.massId) &&
+             data.assignments is list &&
+             data.assignments.size() <= 10; // Bounded
+    }
+
+    function isValidMeeting(data) {
+      return data.keys().hasAll(['parishId', 'title', 'date']) &&
+             isValidId(data.parishId) &&
+             data.title is string && data.title.size() <= 200 &&
+             data.date is string;
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll(['parishId', 'massId', 'readerId', 'comment', 'rating', 'createdAt']) &&
+             isValidId(data.parishId) &&
+             isValidId(data.massId) &&
+             isValidId(data.readerId) &&
+             data.comment is string && data.comment.size() <= 1000 &&
+             data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+             data.createdAt is string;
+    }
+
+    // 2. Collection Rules
+    
+    match /parishes/{parishId} {
+      allow read: if true; 
+      allow create: if isSignedIn() && isValidParish(incoming());
+      allow update: if incoming().diff(existing()).affectedKeys().hasOnly(['name', 'city', 'deanery', 'diocese', 'password']);
+      allow delete: if isAdmin();
+    }
+
+    match /parishes/{parishId}/admins/{adminId} {
+      allow read, write: if isParishAdmin(parishId);
+    }
+
+    match /readers/{readerId} {
+      allow list, get: if true; // Publicly visible for consultation
+      allow create: if isValidReader(incoming());
+      allow update: if isValidReader(incoming()) && incoming().parishId == existing().parishId;
+      allow delete: if true;
+    }
+
+    match /masses/{massId} {
+      allow list, get: if true; // Publicly visible for search
+      allow create: if isValidMass(incoming());
+      allow update: if isValidMass(incoming());
+      allow delete: if true;
+    }
+
+    match /attendance/{attendanceId} {
+      allow list, get: if true;
+      allow create: if isValidAttendance(incoming());
+      allow update: if isValidAttendance(incoming());
+      allow delete: if true;
+    }
+
+    match /plannings/{planningId} {
+      allow list, get: if true; // Publicly visible for consultation
+      allow create: if isValidPlanning(incoming());
+      allow update: if isValidPlanning(incoming()) &&
+                      (incoming().diff(existing()).affectedKeys().hasOnly(['assignments', 'isFinalized']));
+      allow delete: if true;
+    }
+
+    match /meetings/{meetingId} {
+      allow list, get: if true; 
+      allow create: if isValidMeeting(incoming());
+      allow update: if isValidMeeting(incoming());
+      allow delete: if true;
+    }
+
+    match /feedbacks/{feedbackId} {
+      allow list, get: if true;
+      allow create: if isValidFeedback(incoming());
+      allow update: if isValidFeedback(incoming());
+      allow delete: if true;
+    }
+
+    match /password_requests/{requestId} {
+      allow create: if true;
+      allow list: if isAdmin() || (isSignedIn() && (resource.data.adminId == request.auth.uid || isParishAdmin(resource.data.parishId)));
+      allow get, delete: if isAdmin() || (isSignedIn() && (resource.data.adminId == request.auth.uid || isParishAdmin(resource.data.parishId)));
+    }
+
+    match /global_admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Managed via console
+    }
+  }
+}
