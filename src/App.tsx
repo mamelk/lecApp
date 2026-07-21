@@ -2129,33 +2129,13 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [loading, setLoading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<{ data: string; name: string; type: string } | null>(null);
+
   const [commentatorFile, setCommentatorFile] = useState<{ data: string; name: string; type: string } | null>(null);
   const [intentionsFile, setIntentionsFile] = useState<{ data: string; name: string; type: string } | null>(null);
   const [reading1Passage, setReading1Passage] = useState('');
   const [psalmPassage, setPsalmPassage] = useState('');
   const [reading2Passage, setReading2Passage] = useState('');
   const [gospelPassage, setGospelPassage] = useState('');
-
-  const handleMassFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 500 * 1024) {
-        toast.error("Le fichier est trop volumineux. La taille maximale autorisée est de 500 Ko.");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        setSelectedFile({
-          data: reader.result as string,
-          name: file.name,
-          type: file.type
-        });
-        toast.success(`Fichier "${file.name}" prêt pour l'envoi`);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleCommentatorFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2223,9 +2203,6 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
         title,
         maxReaders: 4,
         createdAt: serverTimestamp(),
-        fileData: selectedFile?.data || null,
-        fileName: selectedFile?.name || null,
-        fileType: selectedFile?.type || null,
         commentatorFileData: commentatorFile?.data || null,
         commentatorFileName: commentatorFile?.name || null,
         commentatorFileType: commentatorFile?.type || null,
@@ -2242,7 +2219,6 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
       setTitle('');
       setDate('');
       setTime('');
-      setSelectedFile(null);
       setCommentatorFile(null);
       setIntentionsFile(null);
       setReading1Passage('');
@@ -2321,32 +2297,6 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
                   </div>
                 </div>
                 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Feuille Liturgique / Document (Optionnel - max 500 Ko)</label>
-                  <div className="flex items-center gap-4">
-                    <label className="flex-1 flex items-center justify-center gap-3 p-4 bg-background border border-slate-800 rounded-2xl hover:border-accent cursor-pointer transition-all text-slate-400 hover:text-white">
-                      <Paperclip size={20} className="text-accent" />
-                      <span className="text-sm font-bold truncate">
-                        {selectedFile ? selectedFile.name : "Choisir un fichier (PDF, image...)"}
-                      </span>
-                      <input 
-                        type="file" 
-                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt" 
-                        onChange={handleMassFileUpload} 
-                        className="hidden" 
-                      />
-                    </label>
-                    {selectedFile && (
-                      <button 
-                        type="button"
-                        onClick={() => setSelectedFile(null)} 
-                        className="p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl transition-all"
-                      >
-                        <X size={20} />
-                      </button>
-                    )}
-                  </div>
-                </div>
                 <div className="space-y-4 pt-4 border-t border-slate-800">
                   <div className="grid grid-cols-2 gap-4">
                     <input value={reading1Passage} onChange={e => setReading1Passage(e.target.value)} placeholder="1ère Lecture" className="w-full p-4 bg-background rounded-2xl border border-slate-800 outline-none focus:border-accent text-white" />
@@ -4228,16 +4178,6 @@ export default function App() {
           </nav>
 
           <div className="p-4 border-t border-slate-800 space-y-2">
-             <button 
-              onClick={() => {
-                toast.success("Rafraîchissement en cours...");
-                window.location.reload();
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition-all font-bold text-sm"
-             >
-               <RefreshCw size={20} className="animate-pulse text-accent" />
-               Rafraîchir l'application
-             </button>
              <button 
               onClick={handleLogout}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 transition-all font-bold"
