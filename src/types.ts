@@ -39,6 +39,16 @@ export interface Mass {
   fileData?: string;
   fileName?: string;
   fileType?: string;
+  commentatorFileData?: string;
+  commentatorFileName?: string;
+  commentatorFileType?: string;
+  reading1Passage?: string;
+  psalmPassage?: string;
+  reading2Passage?: string;
+  gospelPassage?: string;
+  intentionsFileData?: string;
+  intentionsFileName?: string;
+  intentionsFileType?: string;
 }
 
 export interface Attendance {
