@@ -141,7 +141,7 @@ const Logo = ({ className = "w-8 h-8", showText = true }: { className?: string, 
       </div>
       {showText && (
         <div className="flex flex-col">
-          <h1 className="text-white font-black text-xl italic tracking-tighter uppercase leading-none">LecApp</h1>
+          <h1 className="text-white font-black text-xl italic tracking-tighter uppercase leading-none">lecApp</h1>
           <p className="text-[10px] text-accent font-bold uppercase tracking-widest mt-1">Service Paroissial</p>
         </div>
       )}
@@ -475,7 +475,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
         </div>
         <div className="flex gap-2">
           <Button 
-            onClick={() => generateGlobalStatsPDF(readers, attendance, Object.values(plannings), masses, feedbacks, currentParish?.name || "LecApp")}
+            onClick={() => generateGlobalStatsPDF(readers, attendance, Object.values(plannings), masses, feedbacks, currentParish?.name || "lecApp")}
             variant="secondary"
             className="p-3 md:px-4 rounded-xl text-xs gap-2"
           >
@@ -691,7 +691,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
                     (p.assignments || []).filter(a => a.readerId === reader.id).map(a => ({ ...a, massId: p.massId }))
                   );
                   const readerFeedbacks = feedbacks.filter(f => f.readerId === reader.id);
-                  generateReaderStatsPDF(reader, readerAttendance, readerAssignments, masses, readerFeedbacks, currentParish?.name || "LecApp");
+                  generateReaderStatsPDF(reader, readerAttendance, readerAssignments, masses, readerFeedbacks, currentParish?.name || "lecApp");
                 }}
                 variant="secondary" 
                 className="w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
@@ -864,7 +864,7 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
                       reader: assign ? readers.find(r => r.id === assign.readerId) || null : null
                     };
                   });
-                  generatePlanningPDF(selectedMass, assignmentsWithReaders, currentParish?.name || "LecApp");
+                  generatePlanningPDF(selectedMass, assignmentsWithReaders, currentParish?.name || "lecApp");
                 }} 
                 variant="secondary"
                 className="text-xs"
@@ -1596,9 +1596,9 @@ const ReaderStatsView = ({ readers, masses, parishId }: { readers: Reader[], mas
             className="text-xs h-10"
             onClick={() => {
               if (selectedReaderId && selectedReader) {
-                generateReaderStatsPDF(selectedReader, readerAttendance, readerAssignments, masses, feedbacks.filter(f => f.readerId === selectedReaderId), currentParish?.name || "LecApp");
+                generateReaderStatsPDF(selectedReader, readerAttendance, readerAssignments, masses, feedbacks.filter(f => f.readerId === selectedReaderId), currentParish?.name || "lecApp");
               } else {
-                generateGlobalStatsPDF(readers, attendance, plannings, masses, feedbacks, currentParish?.name || "LecApp");
+                generateGlobalStatsPDF(readers, attendance, plannings, masses, feedbacks, currentParish?.name || "lecApp");
               }
             }}
           >
@@ -2130,6 +2130,12 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
   const [time, setTime] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ data: string; name: string; type: string } | null>(null);
+  const [commentatorFile, setCommentatorFile] = useState<{ data: string; name: string; type: string } | null>(null);
+  const [intentionsFile, setIntentionsFile] = useState<{ data: string; name: string; type: string } | null>(null);
+  const [reading1Passage, setReading1Passage] = useState('');
+  const [psalmPassage, setPsalmPassage] = useState('');
+  const [reading2Passage, setReading2Passage] = useState('');
+  const [gospelPassage, setGospelPassage] = useState('');
 
   const handleMassFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2141,6 +2147,46 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
       const reader = new FileReader();
       reader.onload = () => {
         setSelectedFile({
+          data: reader.result as string,
+          name: file.name,
+          type: file.type
+        });
+        toast.success(`Fichier "${file.name}" prêt pour l'envoi`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCommentatorFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 500 * 1024) {
+        toast.error("Le fichier est trop volumineux. La taille maximale autorisée est de 500 Ko.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setCommentatorFile({
+          data: reader.result as string,
+          name: file.name,
+          type: file.type
+        });
+        toast.success(`Fichier "${file.name}" prêt pour l'envoi`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleIntentionsFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 500 * 1024) {
+        toast.error("Le fichier est trop volumineux. La taille maximale autorisée est de 500 Ko.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setIntentionsFile({
           data: reader.result as string,
           name: file.name,
           type: file.type
@@ -2179,7 +2225,17 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
         createdAt: serverTimestamp(),
         fileData: selectedFile?.data || null,
         fileName: selectedFile?.name || null,
-        fileType: selectedFile?.type || null
+        fileType: selectedFile?.type || null,
+        commentatorFileData: commentatorFile?.data || null,
+        commentatorFileName: commentatorFile?.name || null,
+        commentatorFileType: commentatorFile?.type || null,
+        reading1Passage,
+        psalmPassage,
+        reading2Passage,
+        gospelPassage,
+        intentionsFileData: intentionsFile?.data || null,
+        intentionsFileName: intentionsFile?.name || null,
+        intentionsFileType: intentionsFile?.type || null
       });
       toast.success("Évènement créé");
       setShowAdd(false);
@@ -2187,6 +2243,12 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
       setDate('');
       setTime('');
       setSelectedFile(null);
+      setCommentatorFile(null);
+      setIntentionsFile(null);
+      setReading1Passage('');
+      setPsalmPassage('');
+      setReading2Passage('');
+      setGospelPassage('');
       onRefresh();
     } catch (e: any) {
       console.error(e);
@@ -2283,6 +2345,46 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
                         <X size={20} />
                       </button>
                     )}
+                  </div>
+                </div>
+                <div className="space-y-4 pt-4 border-t border-slate-800">
+                  <div className="grid grid-cols-2 gap-4">
+                    <input value={reading1Passage} onChange={e => setReading1Passage(e.target.value)} placeholder="1ère Lecture" className="w-full p-4 bg-background rounded-2xl border border-slate-800 outline-none focus:border-accent text-white" />
+                    <input value={psalmPassage} onChange={e => setPsalmPassage(e.target.value)} placeholder="Psaume" className="w-full p-4 bg-background rounded-2xl border border-slate-800 outline-none focus:border-accent text-white" />
+                    <input value={reading2Passage} onChange={e => setReading2Passage(e.target.value)} placeholder="2ème Lecture" className="w-full p-4 bg-background rounded-2xl border border-slate-800 outline-none focus:border-accent text-white" />
+                    <input value={gospelPassage} onChange={e => setGospelPassage(e.target.value)} placeholder="Évangile" className="w-full p-4 bg-background rounded-2xl border border-slate-800 outline-none focus:border-accent text-white" />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Commentaires du Commentateur (Optionnel - max 500 Ko)</label>
+                    <div className="flex items-center gap-4">
+                      <label className="flex-1 flex items-center justify-center gap-3 p-4 bg-background border border-slate-800 rounded-2xl hover:border-accent cursor-pointer transition-all text-slate-400 hover:text-white">
+                        <Paperclip size={20} className="text-accent" />
+                        <span className="text-sm font-bold truncate">
+                          {commentatorFile ? commentatorFile.name : "Choisir un fichier"}
+                        </span>
+                        <input type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt" onChange={handleCommentatorFileUpload} className="hidden" />
+                      </label>
+                      {commentatorFile && (
+                        <button type="button" onClick={() => setCommentatorFile(null)} className="p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl transition-all"><X size={20} /></button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Intentions (Optionnel - max 500 Ko)</label>
+                    <div className="flex items-center gap-4">
+                      <label className="flex-1 flex items-center justify-center gap-3 p-4 bg-background border border-slate-800 rounded-2xl hover:border-accent cursor-pointer transition-all text-slate-400 hover:text-white">
+                        <Paperclip size={20} className="text-accent" />
+                        <span className="text-sm font-bold truncate">
+                          {intentionsFile ? intentionsFile.name : "Choisir un fichier"}
+                        </span>
+                        <input type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt" onChange={handleIntentionsFileUpload} className="hidden" />
+                      </label>
+                      {intentionsFile && (
+                        <button type="button" onClick={() => setIntentionsFile(null)} className="p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl transition-all"><X size={20} /></button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2436,7 +2538,7 @@ const EstechView = () => {
       </section>
 
       <footer className="text-center py-12">
-         <p className="text-slate-600 text-xs font-medium italic">LecApp est une solution propulsée par ESTECH · Étienne Manama</p>
+         <p className="text-slate-600 text-xs font-medium italic">lecApp est une solution propulsée par ESTECH · Étienne Manama</p>
       </footer>
     </div>
   );
@@ -2584,7 +2686,7 @@ const LandingView = ({
         <div className="flex items-end justify-between mb-12">
           <div>
             <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">Annuaire des Paroisses</h3>
-            <p className="text-slate-500 font-medium">Découvrez les communautés utilisant LecApp.</p>
+            <p className="text-slate-500 font-medium">Découvrez les communautés utilisant lecApp.</p>
           </div>
           <div className="text-right">
             <span className="text-4xl font-black text-accent italic">{filteredParishes.length}</span>
@@ -2876,6 +2978,48 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
                           <span className="max-w-[120px] truncate">{mass.fileName || 'Feuille Liturgique'}</span>
                         </button>
                       )}
+                      {mass.commentatorFileData && (
+                        <button 
+                          onClick={() => {
+                            try {
+                              const link = document.createElement('a');
+                              link.href = mass.commentatorFileData!;
+                              link.download = mass.commentatorFileName || 'commentaires.pdf';
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                              toast.success("Téléchargement lancé");
+                            } catch (e) {
+                              toast.error("Erreur de téléchargement");
+                            }
+                          }}
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
+                        >
+                          <FileDown size={14} />
+                          <span className="max-w-[120px] truncate">{mass.commentatorFileName || 'Commentaires'}</span>
+                        </button>
+                      )}
+                      {mass.intentionsFileData && (
+                        <button 
+                          onClick={() => {
+                            try {
+                              const link = document.createElement('a');
+                              link.href = mass.intentionsFileData!;
+                              link.download = mass.intentionsFileName || 'intentions.pdf';
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                              toast.success("Téléchargement lancé");
+                            } catch (e) {
+                              toast.error("Erreur de téléchargement");
+                            }
+                          }}
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
+                        >
+                          <FileDown size={14} />
+                          <span className="max-w-[120px] truncate">{mass.intentionsFileName || 'Intentions'}</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => toggleExpanded(mass.id)}
                         className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all ${isExpanded ? 'bg-accent text-midnight' : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'}`}
@@ -2883,6 +3027,13 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
                         {isExpanded ? <EyeOff size={14} /> : <Eye size={14} />}
                         {isExpanded ? "Masquer les lecteurs" : "Voir les lecteurs"}
                       </button>
+                    </div>
+
+                    <div className="space-y-3 py-4 border-y border-slate-800/80">
+                      {mass.reading1Passage && <p className="text-xs text-slate-300"><b>1ère Lecture:</b> {mass.reading1Passage}</p>}
+                      {mass.psalmPassage && <p className="text-xs text-slate-300"><b>Psaume:</b> {mass.psalmPassage}</p>}
+                      {mass.reading2Passage && <p className="text-xs text-slate-300"><b>2ème Lecture:</b> {mass.reading2Passage}</p>}
+                      {mass.gospelPassage && <p className="text-xs text-slate-300"><b>Évangile:</b> {mass.gospelPassage}</p>}
                     </div>
                   </div>
 
