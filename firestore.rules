@@ -60,7 +60,17 @@ service cloud.firestore {
              data.title is string && data.title.size() <= 200 &&
              (!data.keys().contains('fileData') || data.fileData is string) &&
              (!data.keys().contains('fileName') || data.fileName is string) &&
-             (!data.keys().contains('fileType') || data.fileType is string);
+             (!data.keys().contains('fileType') || data.fileType is string) &&
+             (!data.keys().contains('commentatorFileData') || data.commentatorFileData is string) &&
+             (!data.keys().contains('commentatorFileName') || data.commentatorFileName is string) &&
+             (!data.keys().contains('commentatorFileType') || data.commentatorFileType is string) &&
+             (!data.keys().contains('reading1Passage') || data.reading1Passage is string) &&
+             (!data.keys().contains('psalmPassage') || data.psalmPassage is string) &&
+             (!data.keys().contains('reading2Passage') || data.reading2Passage is string) &&
+             (!data.keys().contains('gospelPassage') || data.gospelPassage is string) &&
+             (!data.keys().contains('intentionsFileData') || data.intentionsFileData is string) &&
+             (!data.keys().contains('intentionsFileName') || data.intentionsFileName is string) &&
+             (!data.keys().contains('intentionsFileType') || data.intentionsFileType is string);
     }
 
     function isValidAttendance(data) {
