@@ -51,13 +51,14 @@ import {
   Paperclip,
   FileText,
   Eye,
-  EyeOff
+  EyeOff,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { 
-  auth, 
-  db 
+  auth,
+  db
 } from './lib/firebase';
 import { 
   onAuthStateChanged, 
@@ -343,6 +344,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
   }) => {
   const { currentParish } = useContext(ParishContext);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingReader, setEditingReader] = useState<Reader | null>(null);
   const [search, setSearch] = useState('');
   const [newName, setNewName] = useState('');
   const [newPostnom, setNewPostnom] = useState('');
@@ -393,6 +395,59 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
         };
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const editReader = (reader: Reader) => {
+    setEditingReader(reader);
+    setNewName(reader.name);
+    setNewPostnom(reader.postnom);
+    setNewPrenom(reader.prenom);
+    setNewBirthDay(reader.birthDay ? reader.birthDay.toString() : '');
+    setNewBirthMonth(reader.birthMonth ? reader.birthMonth.toString() : '');
+    setNewAddress(reader.address || '');
+    setNewPhone(reader.phone || '');
+    setNewEmail(reader.email || '');
+    setNewPhoto(reader.photoURL || '');
+    setNewRoles(reader.roles || []);
+    setShowAdd(true);
+  };
+
+  const updateReader = async () => {
+    if (!editingReader || !newName || !newPostnom || !newPrenom) return;
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'readers', editingReader.id), {
+        name: newName,
+        postnom: newPostnom,
+        prenom: newPrenom,
+        birthDay: newBirthDay ? parseInt(newBirthDay) : null,
+        birthMonth: newBirthMonth ? parseInt(newBirthMonth) : null,
+        address: newAddress,
+        phone: newPhone,
+        email: newEmail,
+        photoURL: newPhoto || null,
+        roles: newRoles,
+      });
+      toast.success("Lecteur mis à jour !");
+      setShowAdd(false);
+      setEditingReader(null);
+      setNewName('');
+      setNewPostnom('');
+      setNewPrenom('');
+      setNewBirthDay('');
+      setNewBirthMonth('');
+      setNewAddress('');
+      setNewPhone('');
+      setNewEmail('');
+      setNewPhoto('');
+      setNewRoles([]);
+      onRefresh();
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erreur de mise à jour");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -506,7 +561,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
             <Card className="space-y-6 border-slate-700 bg-slate-900">
               <div className="flex justify-between items-center">
                 <h3 className="font-bold text-white text-lg italic tracking-tight">Inscription Lecteur</h3>
-                <button onClick={() => setShowAdd(false)} className="text-slate-500 hover:text-white">Fermer</button>
+                <button onClick={() => { setShowAdd(false); setEditingReader(null); }} className="text-slate-500 hover:text-white">Fermer</button>
               </div>
 
               <div className="flex flex-col items-center gap-4 py-4">
@@ -605,8 +660,8 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
                   ))}
                 </div>
               </div>
-              <Button onClick={addReader} disabled={loading} className="w-full py-4 rounded-2xl" variant="accent">
-                {loading ? 'Enregistrement...' : 'Confirmer l\'ajout'}
+              <Button onClick={editingReader ? updateReader : addReader} disabled={loading} className="w-full py-4 rounded-2xl" variant="accent">
+                {loading ? (editingReader ? 'Mise à jour...' : 'Enregistrement...') : (editingReader ? 'Mettre à jour' : 'Confirmer l\'ajout')}
               </Button>
             </Card>
           </motion.div>
@@ -626,12 +681,20 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
               </div>
               <div className="flex flex-col items-end gap-2">
                 <Badge status={reader.trainingStatus} />
-                <button 
-                  onClick={() => deleteReader(reader.id)}
-                  className="p-2 text-slate-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                >
-                  <Trash2 size={16} />
-                </button>
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => editReader(reader)}
+                      className="p-3 text-slate-600 hover:text-accent transition-colors"
+                    >
+                      <Edit2 size={20} />
+                    </button>
+                    <button 
+                      onClick={() => deleteReader(reader.id)}
+                      className="p-3 text-slate-600 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
               </div>
             </div>
             
@@ -2123,12 +2186,14 @@ const PresenceView = ({ masses, readers, parishId }: { masses: Mass[], readers: 
   );
 };
 
-const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId: string, onRefresh: () => void }) => {
+const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], parishId: string, onRefresh: () => void, user: User | null }) => {
   const [showAdd, setShowAdd] = useState(false);
+  const [editingMass, setEditingMass] = useState<Mass | null>(null);
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [loading, setLoading] = useState(false);
+  const [, forceUpdate] = useState({});
 
   const [commentatorFile, setCommentatorFile] = useState<{ data: string; name: string; type: string } | null>(null);
   const [intentionsFile, setIntentionsFile] = useState<{ data: string; name: string; type: string } | null>(null);
@@ -2192,12 +2257,51 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
     }
   };
 
-  const addMass = async () => {
-    if (!title || !date || !time) return;
+  const editMass = (mass: Mass) => {
+    setEditingMass(mass);
+    setTitle(mass.title);
+    setDate(format(parseISO(mass.date), 'yyyy-MM-dd'));
+    setTime(format(parseISO(mass.date), 'HH:mm'));
+    setShowAdd(true);
+  };
+
+  const updateMass = async () => {
+    if (!editingMass || !title || !date || !time) return;
     setLoading(true);
     try {
       const massDate = new Date(`${date}T${time}`);
-      await addDoc(collection(db, 'masses'), {
+      await updateDoc(doc(db, 'masses', editingMass.id), {
+        title,
+        date: massDate.toISOString(),
+      });
+      toast.success("Messe mise à jour");
+      setShowAdd(false);
+      setEditingMass(null);
+      setTitle('');
+      setDate('');
+      setTime('');
+      onRefresh();
+    } catch (e) {
+      toast.error("Erreur de mise à jour");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addMass = async () => {
+    console.log("addMass called, parishId:", parishId, "title:", title, "date:", date, "time:", time, "auth.currentUser:", auth.currentUser);
+    if (!title || !date || !time) return;
+    
+    // Attempting to proceed regardless of auth check, as requested by user
+    setLoading(true);
+    try {
+      const massDate = new Date(`${date}T${time}`);
+      if (isNaN(massDate.getTime())) {
+        console.error("Invalid date created:", `${date}T${time}`);
+        toast.error("La date ou l'heure fournie est invalide.");
+        return;
+      }
+      const massData = {
         parishId,
         date: massDate.toISOString(),
         title,
@@ -2213,7 +2317,9 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
         intentionsFileData: intentionsFile?.data || null,
         intentionsFileName: intentionsFile?.name || null,
         intentionsFileType: intentionsFile?.type || null
-      });
+      };
+      console.log("Attempting to add mass with data:", massData);
+      await addDoc(collection(db, 'masses'), massData);
       toast.success("Évènement créé");
       setShowAdd(false);
       setTitle('');
@@ -2236,29 +2342,29 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
   };
 
   const deleteMass = async (massId: string) => {
-    if (!confirm("Voulez-vous supprimer cette messe ainsi que son planning ?")) return;
+    console.log("deleteMass called for mass:", massId);
     try {
       await deleteDoc(doc(db, 'masses', massId));
-      toast.success("Messe supprimée");
+      console.log("Mass document deleted");
       
       // Cleanup planning
       const planningQ = query(collection(db, 'plannings'), where('massId', '==', massId));
       const pSnap = await getDocs(planningQ);
-      pSnap.forEach(async (d) => {
-        await deleteDoc(doc(db, 'plannings', d.id));
-      });
+      console.log("Found planning docs to delete:", pSnap.size);
+      await Promise.all(pSnap.docs.map(d => deleteDoc(doc(db, 'plannings', d.id))));
 
       // Cleanup attendance
       const attQ = query(collection(db, 'attendance'), where('massId', '==', massId));
       const aSnap = await getDocs(attQ);
-      aSnap.forEach(async (d) => {
-        await deleteDoc(doc(db, 'attendance', d.id));
-      });
+      console.log("Found attendance docs to delete:", aSnap.size);
+      await Promise.all(aSnap.docs.map(d => deleteDoc(doc(db, 'attendance', d.id))));
 
+      toast.success("Messe supprimée");
       onRefresh();
-    } catch (e) {
-       console.error(e);
-       handleFirestoreError(e, OperationType.DELETE, `masses/${massId}`);
+      forceUpdate({});
+    } catch (e: any) {
+      console.error("Error deleting mass:", e);
+      handleFirestoreError(e, OperationType.DELETE, `masses/${massId}`);
     }
   };
 
@@ -2339,8 +2445,8 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
                 </div>
               </div>
               <div className="flex gap-4">
-                <Button onClick={() => setShowAdd(false)} variant="secondary" className="flex-1 rounded-2xl py-4">Annuler</Button>
-                <Button onClick={addMass} disabled={loading} variant="accent" className="flex-1 rounded-2xl py-4">{loading ? 'Création...' : 'Confirmer'}</Button>
+                <Button onClick={() => { setShowAdd(false); setEditingMass(null); }} variant="secondary" className="flex-1 rounded-2xl py-4">Annuler</Button>
+                <Button onClick={editingMass ? updateMass : addMass} disabled={loading} variant="accent" className="flex-1 rounded-2xl py-4">{loading ? (editingMass ? 'Mise à jour...' : 'Création...') : (editingMass ? 'Mettre à jour' : 'Confirmer')}</Button>
               </div>
             </Card>
           </motion.div>
@@ -2358,12 +2464,20 @@ const MassesView = ({ masses, parishId, onRefresh }: { masses: Mass[], parishId:
               <div className="flex-1">
                 <div className="flex justify-between items-start">
                    <h4 className="font-bold text-slate-200 text-lg group-hover:text-white transition-colors">{mass.title}</h4>
-                   <button 
-                    onClick={() => deleteMass(mass.id)}
-                    className="p-2 text-slate-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                   >
-                     <Trash2 size={16} />
-                   </button>
+                   <div className="flex gap-2">
+                     <button 
+                      onClick={() => editMass(mass)}
+                      className="p-3 text-slate-600 hover:text-accent transition-colors"
+                     >
+                       <Edit2 size={20} />
+                     </button>
+                     <button 
+                      onClick={() => deleteMass(mass.id)}
+                      className="p-3 text-slate-600 hover:text-red-500 transition-colors"
+                     >
+                       <Trash2 size={20} />
+                     </button>
+                   </div>
                 </div>
                 <div className="flex items-center gap-3 mt-1.5">
                    <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-500 uppercase tracking-widest">
@@ -3482,6 +3596,7 @@ export default function App() {
     // Listen to masses
     const massesQ = query(collection(db, 'masses'), where('parishId', '==', currentParish.id), orderBy('date', 'desc'));
     const unsubMasses = onSnapshot(massesQ, (snapshot) => {
+      console.log("Masses updated in onSnapshot:", snapshot.size);
       const m: Mass[] = [];
       snapshot.forEach(d => m.push({ ...d.data() as Mass, id: d.id }));
       setActiveMasses(m);
@@ -4256,7 +4371,7 @@ export default function App() {
                     <DashboardView readers={activeReaders} upcomingMasses={activeMasses.slice(0, 5)} upcomingMeetings={activeMeetings.slice(0, 5)} attendanceRecords={activeAttendance} onNavigate={setActiveTab} />
                   )}
                   {activeTab === 'masses' && currentParish && (
-                    <MassesView masses={activeMasses} parishId={currentParish.id} onRefresh={() => {}} />
+                    <MassesView masses={activeMasses} parishId={currentParish.id} onRefresh={() => {}} user={user} />
                   )}
                   {activeTab === 'readers' && currentParish && (
                     <ReadersView 
