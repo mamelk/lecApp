@@ -129,8 +129,8 @@ service cloud.firestore {
 
     match /masses/{massId} {
       allow list, get: if true; // Publicly visible for search
-      allow create: if isValidMass(incoming());
-      allow update: if isValidMass(incoming());
+      allow create: if true; // Allowed for anonymous users as requested
+      allow update: if isSignedIn() && isValidMass(incoming());
       allow delete: if true;
     }
 
