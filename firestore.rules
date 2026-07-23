@@ -79,7 +79,7 @@ service cloud.firestore {
              isValidId(data.readerId) &&
              isValidId(data.massId) &&
              data.status in ['present', 'late', 'absent'] &&
-             data.type in ['rehearsal', 'mass'];
+             data.type in ['mass', 'meeting', 'rehearsal'];
     }
 
     function isValidPlanning(data) {
