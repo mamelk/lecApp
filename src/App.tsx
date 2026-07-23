@@ -52,7 +52,8 @@ import {
   FileText,
   Eye,
   EyeOff,
-  Edit2
+  Edit2,
+  BookOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -1446,6 +1447,67 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
              <p className="text-slate-600 font-bold uppercase tracking-widest text-xs">Aucun retour pour le moment</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+};
+
+const TrainingView = ({ readers }: { readers: Reader[] }) => {
+  const MODULES = [
+    { id: 'liturgy', name: 'Liturgie', description: 'Compréhension de la messe' },
+    { id: 'reading', name: 'Technique de lecture', description: 'Art de la lecture' },
+    { id: 'vocal', name: 'Placement vocal', description: 'Technique vocale' },
+  ];
+
+  const toggleModule = async (reader: Reader, moduleId: string) => {
+    try {
+      const completedModules = reader.completedModules || [];
+      const newModules = completedModules.includes(moduleId)
+        ? completedModules.filter(id => id !== moduleId)
+        : [...completedModules, moduleId];
+      
+      const newStatus: TrainingStatus = newModules.length === MODULES.length 
+        ? 'completed' 
+        : newModules.length > 0 ? 'in_progress' : 'none';
+
+      await updateDoc(doc(db, 'readers', reader.id), { 
+        completedModules: newModules,
+        trainingStatus: newStatus
+      });
+      toast.success("Statut mis à jour");
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `readers/${reader.id}`);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h2 className="text-2xl font-bold text-white">Gestion de la formation</h2>
+        <p className="text-slate-500">Suivi en temps réel de la formation des lecteurs</p>
+      </header>
+
+      <div className="space-y-4">
+        {readers.map(reader => (
+          <div key={reader.id} className="bg-card p-4 rounded-3xl border border-slate-800">
+            <p className="text-white font-bold mb-2">{reader.prenom} {reader.name}</p>
+            <div className="flex gap-2 flex-wrap">
+              {MODULES.map(module => (
+                <button 
+                  key={module.id}
+                  onClick={() => toggleModule(reader, module.id)}
+                  className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    (reader.completedModules || []).includes(module.id) 
+                      ? 'bg-green-500/20 text-green-400 border border-green-500/20' 
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                >
+                  {module.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2946,6 +3008,10 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
       snapshot.forEach(d => m.push({ ...d.data() as Mass, id: d.id }));
       setMasses(m);
       setLoading(false);
+    }, (error) => {
+      console.error("Error loading masses:", error);
+      setLoading(false);
+      handleFirestoreError(error, OperationType.GET, 'masses');
     });
 
     const pQ = query(collection(db, 'plannings'), where('parishId', '==', parish.id));
@@ -3614,13 +3680,13 @@ export default function App() {
     });
 
     // Listen to attendance
-    const attendanceQ = query(collection(db, 'attendance'), where('parishId', '==', currentParish.id));
-    const unsubAttendance = onSnapshot(attendanceQ, (snapshot) => {
+    const attQ = query(collection(db, 'attendance'), where('parishId', '==', currentParish.id));
+    const unsubAttendance = onSnapshot(attQ, (snapshot) => {
       setActiveAttendance(snapshot.docs.map(d => ({ ...d.data() as Attendance, id: d.id })));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'attendance');
     });
-
+    
     // Listen to plannings
     const planningsQ = query(collection(db, 'plannings'), where('parishId', '==', currentParish.id));
     const unsubPlannings = onSnapshot(planningsQ, (snapshot) => {
@@ -3637,9 +3703,16 @@ export default function App() {
     const unsubFeedbacks = onSnapshot(feedbacksQ, (snapshot) => {
       setActiveFeedbacks(snapshot.docs.map(d => ({ ...d.data() as Feedback, id: d.id })));
     });
-
-    return () => { unsubReaders(); unsubMasses(); unsubMeetings(); unsubAttendance(); unsubPlannings(); unsubFeedbacks(); };
-  }, [currentParish]);
+    
+    return () => {
+      unsubReaders();
+      unsubMasses();
+      unsubMeetings();
+      unsubAttendance();
+      unsubPlannings();
+      unsubFeedbacks();
+    };
+  }, [currentParish?.id]);
 
   const login = async () => {
     try {
@@ -4269,6 +4342,7 @@ export default function App() {
                   { id: 'masses', label: 'Messes', icon: Church },
                   { id: 'planning', label: 'Plannings', icon: CalendarDays },
                   { id: 'attendance', label: 'Présences', icon: CheckSquare },
+                  { id: 'training', label: 'Formation', icon: BookOpen },
                   { id: 'meetings', label: 'Réunions', icon: CalendarRange },
                   { id: 'feedback', label: 'Retours', icon: MessageSquare },
                   { id: 'reports', label: 'Rapports', icon: FileDown },
@@ -4396,6 +4470,9 @@ export default function App() {
                   )}
                   {activeTab === 'feedback' && currentParish && (
                     <FeedbackView readers={activeReaders} masses={activeMasses} parishId={currentParish.id} />
+                  )}
+                  {activeTab === 'training' && currentParish && (
+                    <TrainingView readers={activeReaders} />
                   )}
                   {activeTab === 'stats' && currentParish && (
                     <ReaderStatsView readers={activeReaders} masses={activeMasses} parishId={currentParish.id} />
