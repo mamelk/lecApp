@@ -13,6 +13,13 @@ export interface Parish {
   diocese?: string;
 }
 
+export interface TrainingModule {
+  id: string;
+  parishId: string;
+  name: string;
+  description: string;
+}
+
 export interface Reader {
   id: string;
   parishId: string;
@@ -26,6 +33,7 @@ export interface Reader {
   email?: string;
   photoURL?: string;
   trainingStatus: TrainingStatus;
+  completedModules: string[];
   isActive: boolean;
   roles?: string[]; // Allowed roles for this reader
 }
