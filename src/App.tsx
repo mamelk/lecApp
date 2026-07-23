@@ -1454,9 +1454,11 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
 
 const TrainingView = ({ readers }: { readers: Reader[] }) => {
   const MODULES = [
-    { id: 'liturgy', name: 'Liturgie', description: 'Compréhension de la messe' },
-    { id: 'reading', name: 'Technique de lecture', description: 'Art de la lecture' },
-    { id: 'vocal', name: 'Placement vocal', description: 'Technique vocale' },
+    { id: 'diction', name: 'Diction', description: 'Art de la diction' },
+    { id: 'rythme', name: 'Rythme', description: 'Rythme de lecture' },
+    { id: 'gestes', name: 'Gestes/attitudes liturgiques', description: 'Postures' },
+    { id: 'voix', name: 'Voix', description: 'Travail de la voix' },
+    { id: 'intonation', name: 'Intonation', description: 'Travail de l\'intonation' },
   ];
 
   const toggleModule = async (reader: Reader, moduleId: string) => {
@@ -1487,7 +1489,7 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
         <p className="text-slate-500">Suivi en temps réel de la formation des lecteurs</p>
       </header>
 
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {readers.map(reader => (
           <div key={reader.id} className="bg-card p-4 rounded-3xl border border-slate-800">
             <p className="text-white font-bold mb-2">{reader.prenom} {reader.name}</p>
@@ -3704,7 +3706,13 @@ export default function App() {
       setActiveFeedbacks(snapshot.docs.map(d => ({ ...d.data() as Feedback, id: d.id })));
     });
     
+    // Force stop loading after 5s to prevent stuck loading
+    const loadingTimer = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+    
     return () => {
+      clearTimeout(loadingTimer);
       unsubReaders();
       unsubMasses();
       unsubMeetings();
@@ -3877,7 +3885,7 @@ export default function App() {
     };
 
     return (
-      <div className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-md flex items-center justify-center p-6">
+      <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
         <Card className="max-w-md w-full space-y-8 p-10 text-center border-2 border-slate-800 shadow-2xl relative animate-in fade-in zoom-in duration-300">
           <button 
             onClick={() => {
