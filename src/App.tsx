@@ -3085,8 +3085,9 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
                         </button>
                       )}
                       <button
+                        type="button"
                         onClick={() => toggleExpanded(mass.id)}
-                        className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all ${isExpanded ? 'bg-accent text-midnight' : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                        className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all relative z-10 ${isExpanded ? 'bg-accent text-midnight' : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'}`}
                       >
                         {isExpanded ? <EyeOff size={14} /> : <Eye size={14} />}
                         {isExpanded ? "Masquer les lecteurs" : "Voir les lecteurs"}
