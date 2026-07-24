@@ -179,6 +179,7 @@ const Card = ({ children, className = '', ...props }: any) => (
   </div>
 );
 
+
 const Badge = ({ status }: { status: TrainingStatus | string }) => {
   const colors: any = {
     completed: 'bg-green-500/10 text-green-400 border border-green-500/20',
