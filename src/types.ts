@@ -121,3 +121,4 @@ export interface FirestoreErrorInfo {
     isAnonymous?: boolean | null;
   }
 }
+
