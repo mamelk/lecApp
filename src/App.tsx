@@ -53,7 +53,8 @@ import {
   Eye,
   EyeOff,
   Edit2,
-  BookOpen
+  BookOpen,
+  Wallet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -590,7 +591,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
                     </button>
                   )}
                 </div>
-                <p className="text-[9px] text-slate-500 uppercase tracking-widest">Photo de profil (cliquez pour choisir)</p>
+                <p className="text-[9px] text-slate-500 uppercase tracking-widest">Photo de profil (Optionnel, cliquez pour choisir)</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1560,6 +1561,128 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
   );
 };
 
+const TreasuryView = ({ readers, parishId }: { readers: Reader[], parishId: string }) => {
+  const [contributions, setContributions] = useState<Contribution[]>([]);
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [newAmount, setNewAmount] = useState<number>(0);
+  const [selectedReaderId, setSelectedReaderId] = useState<string>('');
+
+  useEffect(() => {
+    const fetchContributions = async () => {
+        const q = query(collection(db, 'contributions'), where('parishId', '==', parishId));
+        const querySnapshot = await getDocs(q);
+        const contribs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contribution));
+        setContributions(contribs);
+    }
+    fetchContributions();
+  }, [parishId]);
+
+  const addContribution = async () => {
+    if (!selectedReaderId || newAmount <= 0) return;
+    
+    const newContrib = {
+      parishId,
+      readerId: selectedReaderId,
+      amount: newAmount,
+      month,
+      year,
+      date: new Date().toISOString(),
+    };
+    
+    try {
+      const docRef = await addDoc(collection(db, 'contributions'), newContrib);
+      setContributions([...contributions, { ...newContrib, id: docRef.id }]);
+      toast.success("Contribution ajoutée");
+      setNewAmount(0);
+    } catch (e) {
+      toast.error("Erreur lors de l'ajout");
+      console.error(e);
+    }
+  };
+
+  const deleteContribution = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'contributions', id));
+      setContributions(contributions.filter(c => c.id !== id));
+      toast.success("Contribution supprimée");
+    } catch (e) {
+      toast.error("Erreur lors de la suppression");
+      console.error(e);
+    }
+  }
+
+  const filteredContributions = useMemo(() => {
+    return contributions.filter(c => c.month === month && c.year === year);
+  }, [contributions, month, year]);
+
+  const grandTotal = useMemo(() => filteredContributions.reduce((sum, c) => sum + c.amount, 0), [filteredContributions]);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-3xl font-black text-white italic uppercase tracking-tight">Trésorerie</h2>
+      
+      <div className="flex gap-4 mb-4">
+        <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-slate-800 p-2 rounded text-white">
+            {[...Array(12).keys()].map(i => <option key={i+1} value={i+1}>{i+1}</option>)}
+        </select>
+        <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-slate-800 p-2 rounded text-white">
+            <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
+        </select>
+      </div>
+
+      <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800/50">
+        <p className="text-slate-400">Solde total du mois: <span className="text-white font-bold text-lg">{grandTotal} CDF</span></p>
+      </div>
+
+      <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800/50 space-y-4">
+        <h3 className="text-xl font-bold text-white">Ajouter une contribution</h3>
+        <div className="flex gap-4">
+          <select value={selectedReaderId} onChange={(e) => setSelectedReaderId(e.target.value)} className="bg-slate-800 p-2 rounded text-white">
+            <option value="">Sélectionner un lecteur</option>
+            {readers.map(r => <option key={r.id} value={r.id}>{r.prenom} {r.name}</option>)}
+          </select>
+          <input type="number" value={newAmount} onChange={(e) => setNewAmount(Number(e.target.value))} className="bg-slate-800 p-2 rounded text-white" placeholder="Montant" />
+          <button onClick={addContribution} className="bg-accent text-midnight p-2 rounded font-bold">Ajouter</button>
+        </div>
+      </div>
+      
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-slate-300">
+          <thead>
+            <tr>
+              <th className="p-3">Lecteur</th>
+              <th className="p-3">Montant</th>
+              <th className="p-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {readers.map(reader => {
+                const readerContribs = filteredContributions.filter(c => c.readerId === reader.id);
+                const total = readerContribs.reduce((sum, c) => sum + c.amount, 0);
+                return (
+                    <tr key={reader.id} className="border-t border-slate-800">
+                      <td className="p-3">{reader.prenom} {reader.name}</td>
+                      <td className="p-3 font-bold">{total} CDF</td>
+                      <td className="p-3">
+                          {readerContribs.map(c => (
+                              <div key={c.id} className="flex gap-2 items-center mb-1">
+                                 {c.amount} CDF
+                                 <button onClick={() => deleteContribution(c.id!)} className="text-red-500 hover:text-red-300 font-bold ml-2">X</button>
+                              </div>
+                          ))}
+                      </td>
+                    </tr>
+                )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+
 /* -------------------------------------------------------------------------- */
 /*                                REPORTS VIEW                                 */
 /* -------------------------------------------------------------------------- */
@@ -1570,20 +1693,86 @@ const ReportsView = ({
   attendance, 
   plannings, 
   feedbacks,
-  parishName 
+  parishId,
+  parishName
 }: { 
   readers: Reader[], 
   masses: Mass[], 
   attendance: Attendance[], 
   plannings: Planning[], 
   feedbacks: Feedback[],
-  parishName: string 
+  parishId: string,
+  parishName: string
 }) => {
+  const [reports, setReports] = useState<Report[]>([]);
+
+  useEffect(() => {
+    const fetchReports = async () => {
+        const q = query(collection(db, 'reports'), where('parishId', '==', parishId));
+        const querySnapshot = await getDocs(q);
+        const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Report));
+        setReports(data);
+    }
+    fetchReports();
+  }, [parishId]);
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        const base64 = reader.result as string;
+        await addDoc(collection(db, 'reports'), {
+            parishId,
+            title: file.name,
+            date: new Date().toISOString(),
+            pdfData: base64,
+            pdfName: file.name,
+            pdfType: file.type
+        });
+        toast.success("Rapport ajouté");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  const downloadPdf = (report: Report) => {
+    if (!report.pdfData) return;
+    const link = document.createElement('a');
+    link.href = report.pdfData;
+    link.download = report.pdfName || 'rapport.pdf';
+    link.click();
+  }
+
+  const deleteReport = async (id: string) => {
+      try {
+          await deleteDoc(doc(db, 'reports', id));
+          setReports(reports.filter(r => r.id !== id));
+          toast.success("Rapport supprimé");
+      } catch (e) {
+          toast.error("Erreur lors de la suppression");
+          console.error(e);
+      }
+  }
+
+  const groupedReports = useMemo(() => {
+    const groups: { [key: string]: Report[] } = {};
+    reports.forEach(r => {
+        const date = parseISO(r.date);
+        const monthYear = format(date, 'MMMM yyyy', { locale: fr });
+        if (!groups[monthYear]) groups[monthYear] = [];
+        groups[monthYear].push(r);
+    });
+    return groups;
+  }, [reports]);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="flex flex-col gap-2">
         <h2 className="text-3xl font-black text-white tracking-tight italic uppercase">Centre de Rapports</h2>
-        <p className="text-slate-500 font-medium tracking-tight">Générez et téléchargez les documents d'activité de votre paroisse.</p>
+        <div className="p-4 bg-slate-900 rounded-xl">
+            <h4 className="text-white font-bold mb-2">Ajouter un rapport PDF</h4>
+            <input type="file" onChange={handlePdfUpload} className="text-slate-300" />
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1606,7 +1795,7 @@ const ReportsView = ({
             <FileDown size={16} className="mr-2" /> Générer Rapport Complet
           </Button>
         </Card>
-
+        
         <Card className="flex flex-col justify-between p-8 space-y-6 bg-slate-900/30 border-slate-800/40 hover:border-blue-500/40 transition-all border-2">
           <div className="space-y-4">
             <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400">
@@ -1638,6 +1827,26 @@ const ReportsView = ({
             </div>
           </div>
         </Card>
+      </div>
+
+      <div className="space-y-6">
+        <h3 className="text-2xl font-bold text-white">Rapports uploadés</h3>
+        {Object.entries(groupedReports).map(([monthYear, monthReports]) => (
+            <div key={monthYear} className="bg-slate-900/50 p-6 rounded-2xl">
+                <h4 className="text-accent font-bold mb-4">{monthYear}</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {monthReports.map(report => (
+                        <div key={report.id} className="bg-slate-800 p-4 rounded-xl flex justify-between items-center">
+                            <p className="text-white font-bold">{report.title}</p>
+                            <div className="flex gap-2">
+                                <button onClick={() => downloadPdf(report)} className="bg-blue-600 text-white p-2 rounded">Télécharger</button>
+                                <button onClick={() => deleteReport(report.id)} className="bg-red-600 text-white p-2 rounded">Supprimer</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        ))}
       </div>
     </div>
   );
@@ -4411,6 +4620,7 @@ export default function App() {
                   { id: 'planning', label: 'Plannings', icon: CalendarDays },
                   { id: 'attendance', label: 'Présences', icon: CheckSquare },
                   { id: 'training', label: 'Formation', icon: BookOpen },
+                  { id: 'treasury', label: 'Trésorerie', icon: Wallet },
                   { id: 'meetings', label: 'Réunions', icon: CalendarRange },
                   { id: 'feedback', label: 'Retours', icon: MessageSquare },
                   { id: 'reports', label: 'Rapports', icon: FileDown },
@@ -4542,6 +4752,9 @@ export default function App() {
                   {activeTab === 'training' && currentParish && (
                     <TrainingView readers={activeReaders} />
                   )}
+                  {activeTab === 'treasury' && currentParish && (
+                    <TreasuryView readers={activeReaders} parishId={currentParish.id} />
+                  )}
                   {activeTab === 'stats' && currentParish && (
                     <ReaderStatsView readers={activeReaders} masses={activeMasses} parishId={currentParish.id} />
                   )}
@@ -4552,6 +4765,7 @@ export default function App() {
                       attendance={activeAttendance} 
                       plannings={activePlannings} 
                       feedbacks={activeFeedbacks} 
+                      parishId={currentParish.id}
                       parishName={currentParish.name} 
                     />
                   )}
