@@ -179,7 +179,6 @@ const Card = ({ children, className = '', ...props }: any) => (
   </div>
 );
 
-
 const Badge = ({ status }: { status: TrainingStatus | string }) => {
   const colors: any = {
     completed: 'bg-green-500/10 text-green-400 border border-green-500/20',
@@ -1354,6 +1353,33 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
     } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'feedbacks'); }
   };
 
+  const deleteFeedback = async (id: string) => {
+    toast.info("Tentative de suppression...");
+    console.log("Attempting to delete feedback with ID:", id);
+    console.log("Collection path: feedbacks");
+    try {
+      const docRef = doc(db, 'feedbacks', id);
+      console.log("Doc ref path:", docRef.path);
+      console.log("Before deleteDoc call");
+      await deleteDoc(docRef);
+      console.log("After deleteDoc call - success");
+      toast.success("Retour supprimé");
+    } catch (e) { 
+      console.error("Deletion error:", e);
+      toast.error("Erreur lors de la suppression");
+      handleFirestoreError(e, OperationType.DELETE, 'feedbacks'); 
+    }
+  };
+
+  const feedbacksByMass = useMemo(() => {
+    return feedbacks.reduce((acc, f) => {
+      const massId = f.massId || 'unknown';
+      if (!acc[massId]) acc[massId] = [];
+      acc[massId].push(f);
+      return acc;
+    }, {} as Record<string, Feedback[]>);
+  }, [feedbacks]);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="flex justify-between items-center">
@@ -1405,47 +1431,65 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
         </Card>
       )}
 
-      <div className="space-y-6">
-        {feedbacks.map((f) => {
-          const reader = readers.find(r => r.id === f.readerId);
-          const mass = masses.find(m => m.id === f.massId);
+      <div className="space-y-10">
+        {Object.entries(feedbacksByMass).map(([massId, feedbacksList]) => {
+          const mass = masses.find(m => m.id === massId);
           return (
-            <Card key={f.id} className="relative overflow-hidden border-slate-800/40">
-              <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
-                 <Quote size={80} />
-              </div>
-              <div className="flex justify-between items-start">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-400">
-                    <UserCircle size={24} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-white uppercase tracking-tighter italic leading-none mb-1">
-                      {reader ? (
-                        <>
-                          {reader.prenom} {reader.name.toUpperCase()} {reader.postnom}
-                        </>
-                      ) : 'Lecteur Supprimé'}
-                    </h4>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">
-                      {mass?.title} · {f.createdAt ? format(parseISO(f.createdAt), 'dd MMM yyyy', { locale: fr }) : '-'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-1">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} size={14} className={i < f.rating ? 'text-accent fill-accent' : 'text-slate-800'} />
-                  ))}
-                </div>
-              </div>
-              <p className="text-slate-300 italic leading-relaxed pl-4 border-l-2 border-accent/30">{f.comment}</p>
-            </Card>
+            <div key={massId} className="space-y-6">
+              <h3 className="text-xl font-bold text-white uppercase tracking-tighter italic border-b border-slate-800 pb-2">
+                {mass?.title || 'Messe inconnue'} · {mass?.date ? format(parseISO(mass.date), 'dd/MM/yyyy', { locale: fr }) : ''}
+              </h3>
+              {feedbacksList.map((f) => {
+                const reader = readers.find(r => r.id === f.readerId);
+                return (
+                  <Card key={f.id} className="relative overflow-hidden border-slate-800/40">
+                    <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+                      <Quote size={80} />
+                    </div>
+                    <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        deleteFeedback(f.id); 
+                      }} 
+                      className="absolute top-2 right-2 p-2 text-slate-600 hover:text-red-500 transition-colors z-10 border border-red-500"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-4 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-400">
+                          <UserCircle size={24} />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-white uppercase tracking-tighter italic leading-none mb-1">
+                            {reader ? (
+                              <>
+                                {reader.prenom} {reader.name.toUpperCase()} {reader.postnom}
+                              </>
+                            ) : 'Lecteur Supprimé'}
+                          </h4>
+                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">
+                            {f.createdAt ? format(parseISO(f.createdAt), 'dd MMM yyyy', { locale: fr }) : '-'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-1 pr-8">
+                        {[...Array(5)].map((_, i) => (
+                          <Star key={i} size={14} className={i < f.rating ? 'text-accent fill-accent' : 'text-slate-800'} />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-slate-300 italic leading-relaxed pl-4 border-l-2 border-accent/30">{f.comment}</p>
+                  </Card>
+                );
+              })}
+            </div>
           );
         })}
         {feedbacks.length === 0 && (
           <div className="py-20 text-center bg-slate-900/20 rounded-[48px] border border-dashed border-slate-800">
-             <MessageSquare size={48} className="mx-auto text-slate-800 mb-4 opacity-20" />
-             <p className="text-slate-600 font-bold uppercase tracking-widest text-xs">Aucun retour pour le moment</p>
+            <MessageSquare size={48} className="mx-auto text-slate-800 mb-4 opacity-20" />
+            <p className="text-slate-600 font-bold uppercase tracking-widest text-xs">Aucun retour pour le moment</p>
           </div>
         )}
       </div>
@@ -2258,7 +2302,15 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [, forceUpdate] = useState({});
+
+  const filteredMasses = useMemo(() => {
+    if (showHistory) return masses;
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    return masses.filter(m => new Date(m.date) >= oneWeekAgo);
+  }, [masses, showHistory]);
 
   const [commentatorFile, setCommentatorFile] = useState<{ data: string; name: string; type: string } | null>(null);
   const [intentionsFile, setIntentionsFile] = useState<{ data: string; name: string; type: string } | null>(null);
@@ -2518,8 +2570,15 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
         )}
       </AnimatePresence>
 
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-bold text-white uppercase tracking-tighter italic">Messes</h3>
+        <Button onClick={() => setShowHistory(!showHistory)} variant="secondary" className="rounded-xl text-xs py-2">
+          {showHistory ? "Masquer l'historique" : "Voir l'historique"}
+        </Button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {masses.map(mass => (
+        {filteredMasses.map(mass => (
           <Card key={mass.id} className="group hover:border-slate-700 transition-all overflow-hidden relative">
             <div className="flex items-start gap-4">
               <div className="w-16 h-16 rounded-3xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center group-hover:border-accent/40 transition-colors">
@@ -4803,4 +4862,3 @@ export default function App() {
     </>
   );
 }
-
