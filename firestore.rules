@@ -107,6 +107,26 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidContribution(data) {
+      return data.keys().hasAll(['parishId', 'readerId', 'amount', 'month', 'year', 'date']) &&
+             isValidId(data.parishId) &&
+             isValidId(data.readerId) &&
+             data.amount is number &&
+             data.month is int && data.month >= 1 && data.month <= 12 &&
+             data.year is int &&
+             data.date is string;
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['parishId', 'title', 'date']) &&
+             isValidId(data.parishId) &&
+             data.title is string && data.title.size() <= 200 &&
+             data.date is string &&
+             (!data.keys().contains('pdfData') || data.pdfData is string) &&
+             (!data.keys().contains('pdfName') || data.pdfName is string) &&
+             (!data.keys().contains('pdfType') || data.pdfType is string);
+    }
+
     // 2. Collection Rules
     
     match /parishes/{parishId} {
@@ -160,6 +180,20 @@ service cloud.firestore {
       allow list, get: if true;
       allow create: if isValidFeedback(incoming());
       allow update: if isValidFeedback(incoming());
+      allow delete: if true;
+    }
+
+    match /contributions/{contributionId} {
+      allow list, get: if true;
+      allow create: if isValidContribution(incoming());
+      allow update: if isValidContribution(incoming());
+      allow delete: if true;
+    }
+
+    match /reports/{reportId} {
+      allow list, get: if true;
+      allow create: if isValidReport(incoming());
+      allow update: if isValidReport(incoming());
       allow delete: if true;
     }
 
