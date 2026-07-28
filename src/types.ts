@@ -32,7 +32,6 @@ export interface Reader {
   phone?: string;
   email?: string;
   photoURL?: string;
-  trainingStatus: TrainingStatus;
   completedModules: string[];
   isActive: boolean;
   roles?: string[]; // Allowed roles for this reader
@@ -99,6 +98,26 @@ export interface Feedback {
   comment: string;
   rating: number;
   createdAt: string;
+}
+
+export interface Contribution {
+  id: string;
+  parishId: string;
+  readerId: string;
+  amount: number;
+  month: number;
+  year: number;
+  date: string; // ISO
+}
+
+export interface Report {
+  id: string;
+  parishId: string;
+  title: string;
+  date: string;
+  pdfData?: string;
+  pdfName?: string;
+  pdfType?: string;
 }
 
 export enum OperationType {
