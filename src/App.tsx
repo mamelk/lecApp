@@ -42,6 +42,7 @@ import {
   CalendarRange,
   MessageSquare,
   Star,
+  AlertCircle,
   Quote,
   Phone,
   MapPin,
@@ -86,7 +87,7 @@ import {
   getDocs,
   writeBatch
 } from 'firebase/firestore';
-import { format, isSameDay, parseISO, parse } from 'date-fns';
+import { format, isSameDay, parseISO, parse, startOfWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { 
   Parish, 
@@ -98,11 +99,16 @@ import {
   Planning, 
   TrainingStatus,
   Meeting,
-  Feedback
+  Feedback,
+  Excuse,
+  Contribution,
+  Report
 } from './types';
 import { handleFirestoreError } from './lib/utils';
 import { OperationType } from './types';
 import { generateReaderStatsPDF, generateGlobalStatsPDF, generatePlanningPDF, generateReaderListPDF } from './lib/reports';
+import { ExcuseModal } from './components/ExcuseModal';
+import { ExcusesView } from './components/ExcusesView';
 
 // --- Contexts ---
 const ParishContext = createContext<{
@@ -201,6 +207,7 @@ const Badge = ({ status }: { status: TrainingStatus | string }) => {
 // --- Views ---
 
 const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRecords, onNavigate }: { readers: Reader[], upcomingMasses: Mass[], upcomingMeetings: Meeting[], attendanceRecords: Attendance[], onNavigate: (tab: string) => void }) => {
+  const [showAllMasses, setShowAllMasses] = useState(false);
   const trainedReaders = readers.filter(r => r.trainingStatus === 'completed').length;
   
   // Calculate global attendance rate
@@ -209,7 +216,26 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
   const globalAttendanceRate = massAttendance.length > 0 
     ? Math.round((presentRecords.length / massAttendance.length) * 100) 
     : 0;
-  
+    
+  const filteredMasses = useMemo(() => {
+    if (showAllMasses) return upcomingMasses;
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    return upcomingMasses.filter(m => new Date(m.date) >= oneWeekAgo);
+  }, [upcomingMasses, showAllMasses]);
+
+  const groupedMasses = useMemo(() => {
+    const groups: Record<string, Mass[]> = {};
+    filteredMasses.forEach(mass => {
+        const date = parseISO(mass.date);
+        const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 });
+        const weekKey = format(startOfWeekDate, 'yyyy-MM-dd');
+        if (!groups[weekKey]) groups[weekKey] = [];
+        groups[weekKey].push(mass);
+    });
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filteredMasses]);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="flex justify-between items-center">
@@ -259,24 +285,34 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <CalendarDays className="text-slate-500" size={20} />
-              Agenda Récent
+              Agenda {showAllMasses ? 'Complet' : 'Récent'}
             </h3>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                onNavigate('masses');
-              }} 
-              className="text-accent text-xs font-bold hover:underline cursor-pointer relative z-10"
-            >
-              Calendrier Complet
-            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setShowAllMasses(!showAllMasses)}
+                className="text-accent text-xs font-bold hover:underline cursor-pointer relative z-10"
+              >
+                {showAllMasses ? 'Voir récent' : 'Voir tout'}
+              </button>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNavigate('masses');
+                }} 
+                className="text-slate-500 text-xs font-bold hover:underline cursor-pointer relative z-10"
+              >
+                Calendrier Complet
+              </button>
+            </div>
           </div>
           <div className="space-y-4">
-            {upcomingMasses.length > 0 ? upcomingMasses.map((mass, idx) => (
+            {groupedMasses.map(([weekKey, weekMasses], groupIdx) => (
+              <div key={weekKey} className="space-y-4">
+                {weekMasses.map((mass) => (
               <Card 
                 key={mass.id} 
                 onClick={() => onNavigate('planning')} 
-                className={`flex items-center gap-6 py-4 cursor-pointer hover:border-accent/40 group transition-colors ${idx === 0 ? 'ring-1 ring-accent/20' : ''}`}
+                className="flex items-center gap-6 py-4 cursor-pointer hover:border-accent/40 group transition-colors"
               >
                 <div className="w-14 h-14 rounded-2xl bg-slate-900 flex flex-col items-center justify-center border border-slate-800">
                   <span className="text-[10px] font-extrabold text-accent uppercase">{format(parseISO(mass.date), 'MMM', { locale: fr })}</span>
@@ -294,12 +330,12 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
                   <ChevronRight size={20} />
                 </Button>
               </Card>
-            )) : (
-              <div className="py-20 text-center bg-slate-900/10 rounded-[32px] border border-dashed border-slate-800">
-                <p className="text-slate-500 text-sm">Le calendrier est vide pour le moment</p>
+                ))}
+                {groupIdx < groupedMasses.length - 1 && <hr className="border-slate-800 my-6" />}
               </div>
-            )}
+            ))}
           </div>
+
         </div>
 
         <aside className="space-y-6">
@@ -1433,7 +1469,7 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
       )}
 
       <div className="space-y-10">
-        {Object.entries(feedbacksByMass).map(([massId, feedbacksList]) => {
+        {Object.entries(feedbacksByMass as Record<string, Feedback[]>).map(([massId, feedbacksList]) => {
           const mass = masses.find(m => m.id === massId);
           return (
             <div key={massId} className="space-y-6">
@@ -1831,7 +1867,7 @@ const ReportsView = ({
 
       <div className="space-y-6">
         <h3 className="text-2xl font-bold text-white">Rapports uploadés</h3>
-        {Object.entries(groupedReports).map(([monthYear, monthReports]) => (
+        {Object.entries(groupedReports as Record<string, Report[]>).map(([monthYear, monthReports]) => (
             <div key={monthYear} className="bg-slate-900/50 p-6 rounded-2xl">
                 <h4 className="text-accent font-bold mb-4">{monthYear}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2511,15 +2547,40 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showFullHistory, setShowFullHistory] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [, forceUpdate] = useState({});
 
   const filteredMasses = useMemo(() => {
-    if (showHistory) return masses;
+    if (selectedDate) {
+        const start = new Date(selectedDate);
+        const day = start.getDay();
+        const diff = day === 0 ? 6 : day - 1;
+        start.setDate(start.getDate() - diff); // Start of the week (Monday)
+        const end = new Date(start);
+        end.setDate(end.getDate() + 7);
+        return masses.filter(m => {
+            const d = new Date(m.date);
+            return d >= start && d < end;
+        });
+    }
+    if (showFullHistory) return masses;
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     return masses.filter(m => new Date(m.date) >= oneWeekAgo);
-  }, [masses, showHistory]);
+  }, [masses, showFullHistory, selectedDate]);
+
+  const groupedMasses = useMemo(() => {
+    const groups: Record<string, Mass[]> = {};
+    filteredMasses.forEach(mass => {
+        const date = parseISO(mass.date);
+        const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 });
+        const weekKey = format(startOfWeekDate, 'yyyy-MM-dd');
+        if (!groups[weekKey]) groups[weekKey] = [];
+        groups[weekKey].push(mass);
+    });
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [filteredMasses]);
 
   const [commentatorFile, setCommentatorFile] = useState<{ data: string; name: string; type: string } | null>(null);
   const [intentionsFile, setIntentionsFile] = useState<{ data: string; name: string; type: string } | null>(null);
@@ -2781,13 +2842,21 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
 
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-xl font-bold text-white uppercase tracking-tighter italic">Messes</h3>
-        <Button onClick={() => setShowHistory(!showHistory)} variant="secondary" className="rounded-xl text-xs py-2">
-          {showHistory ? "Masquer l'historique" : "Voir l'historique"}
-        </Button>
+        <div className="flex gap-2">
+          <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setShowFullHistory(false); }} className="bg-slate-800 text-white p-2 rounded-xl text-xs" />
+          <Button onClick={() => { setShowFullHistory(!showFullHistory); setSelectedDate(''); }} variant="secondary" className="rounded-xl text-xs py-2">
+            {showFullHistory ? "Masquer tout" : "Voir tout"}
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filteredMasses.map(mass => (
+        {groupedMasses.map(([weekKey, weekMasses]) => (
+          <div key={weekKey} className="space-y-4 col-span-full">
+            <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-8">Semaine du {format(parseISO(weekKey), 'd MMMM yyyy', { locale: fr })}</h4>
+            <hr className="border-slate-800" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {weekMasses.map(mass => (
           <Card key={mass.id} className="group hover:border-slate-700 transition-all overflow-hidden relative">
             <div className="flex items-start gap-4">
               <div className="w-16 h-16 rounded-3xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center group-hover:border-accent/40 transition-colors">
@@ -2838,6 +2907,9 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
             </div>
             <Church className="absolute -right-4 -bottom-4 w-16 h-16 text-white/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
           </Card>
+                ))}
+            </div>
+          </div>
         ))}
         {masses.length === 0 && (
           <div className="col-span-full py-20 text-center bg-slate-900/20 rounded-[48px] border border-dashed border-slate-800">
@@ -3262,6 +3334,8 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedMassReaders, setExpandedMassReaders] = useState<Record<string, boolean>>({});
+  const [showAllWeeks, setShowAllWeeks] = useState(false);
+  const [excuseModal, setExcuseModal] = useState<{isOpen: boolean, date: string}>({isOpen: false, date: ''});
 
   const toggleExpanded = (massId: string) => {
     setExpandedMassReaders(prev => ({
@@ -3312,6 +3386,18 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
     return () => { unsubMasses(); unsubPlannings(); unsubReaders(); unsubFeedbacks(); };
   }, [parish]);
 
+  const groupedMasses = useMemo(() => {
+    const groups: Record<string, Mass[]> = {};
+    masses.forEach(mass => {
+        const date = parseISO(mass.date);
+        const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 });
+        const weekKey = format(startOfWeekDate, 'yyyy-MM-dd');
+        if (!groups[weekKey]) groups[weekKey] = [];
+        groups[weekKey].push(mass);
+    });
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [masses]);
+
   return (
     <div className="min-h-screen bg-background p-6 md:p-12 animate-in fade-in duration-500">
       <div className="max-w-4xl mx-auto space-y-12">
@@ -3330,6 +3416,13 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             >
               Gérer la Paroisse
             </Button>
+            <Button
+              onClick={() => setExcuseModal({isOpen: true, date: new Date().toISOString()})}
+              variant="outline"
+              className="flex text-[10px] uppercase font-bold tracking-widest border-slate-800 hover:border-accent hover:text-accent"
+            >
+              S'excuser
+            </Button>
             <div>
                <h1 className="text-2xl font-black text-white italic uppercase tracking-tighter">{parish.name}</h1>
                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{parish.diocese || 'Consultation Publique'}</p>
@@ -3343,139 +3436,161 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Chargement du planning...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-32">
-            {masses.map(mass => {
-              const planning = plannings[mass.id];
-              const isExpanded = expandedMassReaders[mass.id];
-              return (
-                <Card key={mass.id} className="p-8 space-y-6 bg-slate-900/30 border-slate-800/50 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <div className="space-y-1">
-                      <h3 className="font-black text-white text-xl uppercase italic tracking-tighter">{mass.title}</h3>
-                      <p className="text-accent font-bold text-[10px] uppercase tracking-widest">
-                        {format(parseISO(mass.date), 'EEEE d MMMM · HH:mm', { locale: fr })}
-                      </p>
-                    </div>
+          <div className="space-y-8 pb-32">
+            {(showAllWeeks ? groupedMasses : groupedMasses.slice(0, 1)).map(([weekKey, weekMasses]) => (
+              <div key={weekKey} className="space-y-4">
+                <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-8">Semaine du {format(parseISO(weekKey), 'd MMMM yyyy', { locale: fr })}</h4>
+                <hr className="border-slate-800" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {weekMasses.map(mass => {
+                    const planning = plannings[mass.id];
+                    const isExpanded = expandedMassReaders[mass.id];
+                    return (
+                      <Card key={mass.id} className="p-8 space-y-6 bg-slate-900/30 border-slate-800/50 flex flex-col justify-between">
+                        <div className="space-y-4">
+                          <div className="space-y-1">
+                            <h3 className="font-black text-white text-xl uppercase italic tracking-tighter">{mass.title}</h3>
+                            <p className="text-accent font-bold text-[10px] uppercase tracking-widest">
+                              {format(parseISO(mass.date), 'EEEE d MMMM · HH:mm', { locale: fr })}
+                            </p>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-2.5 pt-2">
+                            {mass.fileData && (
+                              <button 
+                                onClick={() => {
+                                  try {
+                                    const link = document.createElement('a');
+                                    link.href = mass.fileData!;
+                                    link.download = mass.fileName || 'liturgie.pdf';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    toast.success("Téléchargement lancé");
+                                  } catch (e) {
+                                    toast.error("Erreur de téléchargement");
+                                  }
+                                }}
+                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
+                              >
+                                <FileDown size={14} />
+                                <span className="max-w-[120px] truncate">{mass.fileName || 'Feuille Liturgique'}</span>
+                              </button>
+                            )}
+                            {mass.commentatorFileData && (
+                              <button 
+                                onClick={() => {
+                                  try {
+                                    const link = document.createElement('a');
+                                    link.href = mass.commentatorFileData!;
+                                    link.download = mass.commentatorFileName || 'commentaires.pdf';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    toast.success("Téléchargement lancé");
+                                  } catch (e) {
+                                    toast.error("Erreur de téléchargement");
+                                  }
+                                }}
+                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
+                              >
+                                <FileDown size={14} />
+                                <span className="max-w-[120px] truncate">{mass.commentatorFileName || 'Commentaires'}</span>
+                              </button>
+                            )}
+                            {mass.intentionsFileData && (
+                              <button 
+                                onClick={() => {
+                                  try {
+                                    const link = document.createElement('a');
+                                    link.href = mass.intentionsFileData!;
+                                    link.download = mass.intentionsFileName || 'intentions.pdf';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    toast.success("Téléchargement lancé");
+                                  } catch (e) {
+                                    toast.error("Erreur de téléchargement");
+                                  }
+                                }}
+                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
+                              >
+                                <FileDown size={14} />
+                                <span className="max-w-[120px] truncate">{mass.intentionsFileName || 'Intentions'}</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => toggleExpanded(mass.id)}
+                              className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all relative z-10 ${isExpanded ? 'bg-accent text-midnight' : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                            >
+                              {isExpanded ? <EyeOff size={14} /> : <Eye size={14} />}
+                              {isExpanded ? "Masquer les lecteurs" : "Voir les lecteurs"}
+                            </button>
+                          </div>
 
-                    <div className="flex flex-wrap gap-2.5 pt-2">
-                      {mass.fileData && (
-                        <button 
-                          onClick={() => {
-                            try {
-                              const link = document.createElement('a');
-                              link.href = mass.fileData!;
-                              link.download = mass.fileName || 'liturgie.pdf';
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                              toast.success("Téléchargement lancé");
-                            } catch (e) {
-                              toast.error("Erreur de téléchargement");
-                            }
-                          }}
-                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
-                        >
-                          <FileDown size={14} />
-                          <span className="max-w-[120px] truncate">{mass.fileName || 'Feuille Liturgique'}</span>
-                        </button>
-                      )}
-                      {mass.commentatorFileData && (
-                        <button 
-                          onClick={() => {
-                            try {
-                              const link = document.createElement('a');
-                              link.href = mass.commentatorFileData!;
-                              link.download = mass.commentatorFileName || 'commentaires.pdf';
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                              toast.success("Téléchargement lancé");
-                            } catch (e) {
-                              toast.error("Erreur de téléchargement");
-                            }
-                          }}
-                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
-                        >
-                          <FileDown size={14} />
-                          <span className="max-w-[120px] truncate">{mass.commentatorFileName || 'Commentaires'}</span>
-                        </button>
-                      )}
-                      {mass.intentionsFileData && (
-                        <button 
-                          onClick={() => {
-                            try {
-                              const link = document.createElement('a');
-                              link.href = mass.intentionsFileData!;
-                              link.download = mass.intentionsFileName || 'intentions.pdf';
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                              toast.success("Téléchargement lancé");
-                            } catch (e) {
-                              toast.error("Erreur de téléchargement");
-                            }
-                          }}
-                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent/10 hover:bg-accent text-accent hover:text-midnight text-[10px] font-bold uppercase tracking-widest transition-all"
-                        >
-                          <FileDown size={14} />
-                          <span className="max-w-[120px] truncate">{mass.intentionsFileName || 'Intentions'}</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => toggleExpanded(mass.id)}
-                        className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all relative z-10 ${isExpanded ? 'bg-accent text-midnight' : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'}`}
-                      >
-                        {isExpanded ? <EyeOff size={14} /> : <Eye size={14} />}
-                        {isExpanded ? "Masquer les lecteurs" : "Voir les lecteurs"}
-                      </button>
-                    </div>
+                          <div className="space-y-3 py-4 border-y border-slate-800/80">
+                            {mass.reading1Passage && <p className="text-xs text-slate-300"><b>1ère Lecture:</b> {mass.reading1Passage}</p>}
+                            {mass.psalmPassage && <p className="text-xs text-slate-300"><b>Psaume:</b> {mass.psalmPassage}</p>}
+                            {mass.reading2Passage && <p className="text-xs text-slate-300"><b>2ème Lecture:</b> {mass.reading2Passage}</p>}
+                            {mass.gospelPassage && <p className="text-xs text-slate-300"><b>Évangile:</b> {mass.gospelPassage}</p>}
+                          </div>
+                        </div>
 
-                    <div className="space-y-3 py-4 border-y border-slate-800/80">
-                      {mass.reading1Passage && <p className="text-xs text-slate-300"><b>1ère Lecture:</b> {mass.reading1Passage}</p>}
-                      {mass.psalmPassage && <p className="text-xs text-slate-300"><b>Psaume:</b> {mass.psalmPassage}</p>}
-                      {mass.reading2Passage && <p className="text-xs text-slate-300"><b>2ème Lecture:</b> {mass.reading2Passage}</p>}
-                      {mass.gospelPassage && <p className="text-xs text-slate-300"><b>Évangile:</b> {mass.gospelPassage}</p>}
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden space-y-5 pt-6 border-t border-slate-800/80 mt-4"
-                      >
-                        {ROLES.map(role => {
-                          const assignment = planning?.assignments?.find(a => a.role === role.id);
-                          const reader = readers.find(r => r.id === assignment?.readerId);
-                          return (
-                            <PublicReaderAssignment 
-                              key={role.id} 
-                              role={role} 
-                              reader={reader} 
-                              mass={mass} 
-                              parish={parish} 
-                              feedbacks={feedbacks}
-                            />
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </Card>
-              );
-            })}
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div 
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden space-y-5 pt-6 border-t border-slate-800/80 mt-4"
+                            >
+                              {ROLES.map(role => {
+                                const assignment = planning?.assignments?.find(a => a.role === role.id);
+                                const reader = readers.find(r => r.id === assignment?.readerId);
+                                return (
+                                  <PublicReaderAssignment 
+                                    key={role.id} 
+                                    role={role} 
+                                    reader={reader} 
+                                    mass={mass} 
+                                    parish={parish} 
+                                    feedbacks={feedbacks}
+                                  />
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {!showAllWeeks && groupedMasses.length > 1 && (
+              <div className="flex justify-center pt-8">
+                <Button onClick={() => setShowAllWeeks(true)} variant="outline" className="text-[10px] font-bold uppercase tracking-widest">
+                  Voir les autres messes
+                </Button>
+              </div>
+            )}
             {masses.length === 0 && (
               <div className="col-span-full py-24 text-center bg-slate-900/10 rounded-[64px] border border-dashed border-slate-800">
-                 <CalendarDays size={48} className="mx-auto text-slate-800 mb-6" />
-                 <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Aucune célébration prévue pour le moment</p>
+                  <CalendarDays size={48} className="mx-auto text-slate-800 mb-6" />
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Aucune célébration prévue pour le moment</p>
               </div>
             )}
           </div>
         )}
       </div>
+      <ExcuseModal 
+        isOpen={excuseModal.isOpen} 
+        onClose={() => setExcuseModal({isOpen: false, date: ''})} 
+        date={excuseModal.date}
+        readers={readers}
+        parishId={parish.id}
+      />
       <div className="max-w-4xl mx-auto px-6 pb-12">
         <footer className="border-t border-slate-900 py-12 flex flex-col items-center gap-4">
           <button onClick={onEstechClick} className="text-slate-800 font-black tracking-[0.2em] uppercase hover:text-accent transition-colors">Estech</button>
@@ -3663,6 +3778,7 @@ export default function App() {
   const [activeAttendance, setActiveAttendance] = useState<Attendance[]>([]);
   const [activePlannings, setActivePlannings] = useState<Record<string, Planning>>({});
   const [activeFeedbacks, setActiveFeedbacks] = useState<Feedback[]>([]);
+  const [activeExcuses, setActiveExcuses] = useState<Excuse[]>([]);
   const [isDeletingParish, setIsDeletingParish] = useState<string | null>(null);
   const [isWipingAll, setIsWipingAll] = useState(false);
   const [passwordRequests, setPasswordRequests] = useState<any[]>([]);
@@ -3974,6 +4090,12 @@ export default function App() {
     const unsubFeedbacks = onSnapshot(feedbacksQ, (snapshot) => {
       setActiveFeedbacks(snapshot.docs.map(d => ({ ...d.data() as Feedback, id: d.id })));
     });
+
+    // Listen to excuses
+    const excusesQ = query(collection(db, 'excuses'), where('parishId', '==', currentParish.id));
+    const unsubExcuses = onSnapshot(excusesQ, (snapshot) => {
+      setActiveExcuses(snapshot.docs.map(d => ({ ...d.data() as Excuse, id: d.id })));
+    });
     
     // Force stop loading after 5s to prevent stuck loading
     const loadingTimer = setTimeout(() => {
@@ -3988,6 +4110,7 @@ export default function App() {
       unsubAttendance();
       unsubPlannings();
       unsubFeedbacks();
+      unsubExcuses();
     };
   }, [currentParish?.id]);
 
@@ -4623,6 +4746,7 @@ export default function App() {
                   { id: 'treasury', label: 'Trésorerie', icon: Wallet },
                   { id: 'meetings', label: 'Réunions', icon: CalendarRange },
                   { id: 'feedback', label: 'Retours', icon: MessageSquare },
+                  { id: 'excuses', label: 'Excuses', icon: AlertCircle },
                   { id: 'reports', label: 'Rapports', icon: FileDown },
                   { id: 'settings', label: 'Paramètres', icon: Settings }
                 ].map((item) => (
@@ -4748,6 +4872,9 @@ export default function App() {
                   )}
                   {activeTab === 'feedback' && currentParish && (
                     <FeedbackView readers={activeReaders} masses={activeMasses} parishId={currentParish.id} />
+                  )}
+                  {activeTab === 'excuses' && currentParish && (
+                    <ExcusesView excuses={activeExcuses} readers={activeReaders} />
                   )}
                   {activeTab === 'training' && currentParish && (
                     <TrainingView readers={activeReaders} />
