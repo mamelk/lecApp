@@ -38,8 +38,8 @@ export const ExcuseModal: React.FC<Props> = ({ isOpen, onClose, date, readers, p
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-slate-900 p-6 sm:p-8 rounded-xl border border-slate-800 w-full max-w-md">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
+        <div className="bg-slate-900 p-4 sm:p-8 rounded-xl border border-slate-800 w-full max-w-sm sm:max-w-md overflow-hidden">
             <h2 className="text-xl font-bold text-white mb-4">Présenter mes excuses</h2>
             <select className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white mb-4" value={readerId} onChange={e => setReaderId(e.target.value)}>
                 <option value="">Sélectionner un lecteur</option>
