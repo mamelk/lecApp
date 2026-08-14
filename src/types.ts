@@ -35,6 +35,7 @@ export interface Reader {
   completedModules: string[];
   isActive: boolean;
   roles?: string[]; // Allowed roles for this reader
+  trainingStatus?: TrainingStatus;
 }
 
 export interface Mass {
@@ -98,6 +99,16 @@ export interface Feedback {
   comment: string;
   rating: number;
   createdAt: string;
+}
+
+export interface Excuse {
+  id: string;
+  parishId: string;
+  readerId: string;
+  message: string;
+  date: string; // The date of the meeting/mass
+  createdAt: string; // ISO String
+  approved?: boolean;
 }
 
 export interface Contribution {
