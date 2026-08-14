@@ -127,8 +127,24 @@ service cloud.firestore {
              (!data.keys().contains('pdfType') || data.pdfType is string);
     }
 
+    function isValidExcuse(data) {
+      return data.keys().hasAll(['parishId', 'readerId', 'message', 'date']) &&
+             isValidId(data.parishId) &&
+             isValidId(data.readerId) &&
+             data.message is string && data.message.size() <= 2000 &&
+             data.date is string &&
+             (!data.keys().contains('createdAt') || data.createdAt is string) &&
+             (!data.keys().contains('approved') || data.approved is bool);
+    }
+
     // 2. Collection Rules
     
+    match /excuses/{excuseId} {
+      allow list, get: if true;
+      allow create: if isValidExcuse(incoming());
+      allow update, delete: if true;
+    }
+
     match /parishes/{parishId} {
       allow read: if true; 
       allow create: if isSignedIn() && isValidParish(incoming());
