@@ -15,21 +15,29 @@ export const ExcusesView: React.FC<Props> = ({ excuses, readers }) => {
 
   const handleApprove = async (id: string) => {
     try {
-      await updateDoc(doc(db, 'excuses', id), { approved: true });
-    } catch (e) {
-      console.error("Error approving excuse:", e);
+      console.log("Tentative d'approbation de l'excuse avec ID :", id);
+      const excuseDocRef = doc(db, 'excuses', id);
+      await updateDoc(excuseDocRef, { approved: true });
+      console.log("Excuse approuvée avec succès");
+    } catch (e: any) {
+      console.error("Erreur détaillée lors de l'approbation de l'excuse :", e);
+      console.error("Code erreur :", e.code);
+      console.error("Message erreur :", e.message);
+      alert(`Erreur lors de l'approbation : ${e.message}`);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("Êtes-vous sûr de vouloir supprimer cette excuse ?")) {
-      try {
-        console.log("Suppression de l'excuse :", id);
-        await deleteDoc(doc(db, 'excuses', id));
-        console.log("Excuse supprimée avec succès");
-      } catch (e) {
-        console.error("Error deleting excuse:", e);
-      }
+    try {
+      console.log("Tentative de suppression de l'excuse avec ID :", id);
+      const excuseDocRef = doc(db, 'excuses', id);
+      await deleteDoc(excuseDocRef);
+      console.log("Excuse supprimée avec succès");
+    } catch (e: any) {
+      console.error("Erreur détaillée lors de la suppression de l'excuse :", e);
+      console.error("Code erreur :", e.code);
+      console.error("Message erreur :", e.message);
+      alert(`Erreur lors de la suppression : ${e.message}`);
     }
   };
 
