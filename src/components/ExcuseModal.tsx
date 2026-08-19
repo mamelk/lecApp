@@ -19,19 +19,29 @@ export const ExcuseModal: React.FC<Props> = ({ isOpen, onClose, date, readers, p
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
-    if (!readerId || !message) return;
+    if (!readerId || !message) {
+      alert("Veuillez remplir tous les champs.");
+      return;
+    }
+    
+    const excuseData = {
+      parishId,
+      readerId,
+      message,
+      date,
+      createdAt: new Date().toISOString()
+    };
+
     setLoading(true);
     try {
-        await addDoc(collection(db, 'excuses'), {
-            parishId,
-            readerId,
-            message,
-            date,
-            createdAt: new Date().toISOString()
-        });
+        console.log("Tentative d'envoi de l'excuse :", excuseData);
+        await addDoc(collection(db, 'excuses'), excuseData);
+        console.log("Excuse envoyée avec succès");
         onClose();
-    } catch (e) {
-        console.error(e);
+    } catch (e: any) {
+        console.error("Erreur détaillée lors de l'envoi de l'excuse :", e);
+        console.error("Données envoyées :", excuseData);
+        alert(`Erreur lors de l'envoi : ${e.message || e}`);
     } finally {
         setLoading(false);
     }
