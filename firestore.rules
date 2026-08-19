@@ -141,8 +141,9 @@ service cloud.firestore {
     
     match /excuses/{excuseId} {
       allow list, get: if true;
-      allow create: if isValidExcuse(incoming());
-      allow update, delete: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if true;
     }
 
     match /parishes/{parishId} {
