@@ -55,7 +55,8 @@ import {
   EyeOff,
   Edit2,
   BookOpen,
-  Wallet
+  Wallet,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -104,11 +105,13 @@ import {
   Contribution,
   Report
 } from './types';
-import { handleFirestoreError } from './lib/utils';
+import { handleFirestoreError, confirmAsync } from './lib/utils';
 import { OperationType } from './types';
 import { generateReaderStatsPDF, generateGlobalStatsPDF, generatePlanningPDF, generateReaderListPDF } from './lib/reports';
 import { ExcuseModal } from './components/ExcuseModal';
 import { ExcusesView } from './components/ExcusesView';
+import { Button, Card, Badge, PageHeader, SectionTitle, StatCard, Field, Input, Select, EmptyState, Modal, inputClass } from './components/ui';
+import { NAV_GROUPS, NAV_ITEMS, getNavItem, MOBILE_PRIMARY, NavId } from './navigation';
 
 // --- Contexts ---
 const ParishContext = createContext<{
@@ -158,55 +161,23 @@ const Logo = ({ className = "w-8 h-8", showText = true }: { className?: string, 
   );
 };
 
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, ...props }: any) => {
-  const variants: any = {
-    primary: 'bg-primary text-white hover:bg-slate-800 border border-slate-700 shadow-lg',
-    secondary: 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700',
-    accent: 'bg-accent text-midnight font-bold hover:bg-amber-400 shadow-lg shadow-amber-500/20',
-    ghost: 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-  };
-  return (
-    <button 
-      disabled={disabled}
-      onClick={onClick}
-      className={`px-4 py-2.5 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 ${variants[variant]} ${className}`}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-};
+// Button, Card and Badge are now imported from the shared kit
+// (src/components/ui.tsx) so every view uses the exact same building blocks.
 
-const Card = ({ children, className = '', ...props }: any) => (
-  <div 
-    className={`bg-card rounded-3xl p-6 border border-slate-800/50 shadow-xl transition-all ${className}`}
-    {...props}
-  >
-    {children}
-  </div>
-);
+// --- Shared constants ---
 
-const Badge = ({ status }: { status: TrainingStatus | string }) => {
-  const colors: any = {
-    completed: 'bg-green-500/10 text-green-400 border border-green-500/20',
-    in_progress: 'bg-amber-500/10 text-amber-500 border border-amber-500/20',
-    none: 'bg-slate-800 text-slate-500 border border-slate-700',
-    present: 'bg-green-500/10 text-green-400 border border-green-500/20',
-    late: 'bg-amber-500/10 text-amber-500 border border-amber-500/20',
-    absent: 'bg-red-500/10 text-red-400 border border-red-500/20',
-    'confirmé': 'bg-green-500/10 text-green-400 border border-green-500/20',
-    'à compléter': 'bg-red-500/10 text-red-400 border border-red-500/20',
-  };
-  return (
-    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${colors[status] || 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
-      {status.replace('_', ' ')}
-    </span>
-  );
-};
+const MONTH_NAMES = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
+
+const CURRENT_YEAR = new Date().getFullYear();
+const AVAILABLE_YEARS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1];
 
 // --- Views ---
 
 const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRecords, onNavigate }: { readers: Reader[], upcomingMasses: Mass[], upcomingMeetings: Meeting[], attendanceRecords: Attendance[], onNavigate: (tab: string) => void }) => {
+  const { currentParish } = useContext(ParishContext);
   const [showAllMasses, setShowAllMasses] = useState(false);
   const trainedReaders = readers.filter(r => r.trainingStatus === 'completed').length;
   
@@ -238,49 +209,52 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <header className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight italic uppercase">Tableau de Bord</h1>
-          <p className="text-slate-500 font-medium text-xs md:text-sm">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
-        </div>
-      </header>
+      <PageHeader
+        title="Tableau de bord"
+        description={format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="md:col-span-1 border-slate-800">
-          <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">Lecteurs Formés</p>
-          <div className="mt-4 flex items-baseline gap-2">
-            <h2 className="text-3xl md:text-4xl font-bold text-white leading-none">{trainedReaders}</h2>
-            <span className="text-green-400 text-xs font-bold font-mono">/{readers.length}</span>
-          </div>
-        </Card>
-        
-        <Card className="md:col-span-1 border-slate-800 cursor-pointer hover:border-accent/40" onClick={() => onNavigate('masses')}>
-          <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">Messes prévues</p>
-          <h2 className="text-3xl md:text-4xl font-bold text-white mt-4">{upcomingMasses.length}</h2>
-        </Card>
-
-        <Card className="md:col-span-1 border-accent/20 bg-accent/5 cursor-pointer hover:border-accent" onClick={() => onNavigate('meetings')}>
-          <p className="text-accent text-[10px] md:text-xs font-bold uppercase tracking-widest">Réunions</p>
-          <h2 className="text-3xl md:text-4xl font-bold text-white mt-4">{upcomingMeetings.length}</h2>
-        </Card>
-
-        <Card className="md:col-span-1 bg-[#0B1120] relative overflow-hidden group border-slate-800 cursor-pointer hover:border-accent" onClick={() => onNavigate('planning')}>
-          <div className="relative z-10">
-            <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">Prochain Service</p>
-            {upcomingMasses[0] ? (
-              <>
-                <h2 className="text-xl md:text-2xl font-bold text-white mt-4">{upcomingMasses[0].title}</h2>
-                <p className="text-accent font-mono text-[11px] md:text-sm mt-1">{format(parseISO(upcomingMasses[0].date), 'EEEE HH:mm', { locale: fr })}</p>
-              </>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Lecteurs formés"
+          value={trainedReaders}
+          hint={`sur ${readers.length} inscrits`}
+          icon={Users}
+          onClick={() => onNavigate('readers')}
+        />
+        <StatCard
+          label="Messes prévues"
+          value={upcomingMasses.length}
+          hint="Célébrations à venir"
+          icon={Church}
+          onClick={() => onNavigate('masses')}
+        />
+        <StatCard
+          label="Réunions"
+          value={upcomingMeetings.length}
+          hint="Rencontres planifiées"
+          icon={CalendarRange}
+          tone="accent"
+          onClick={() => onNavigate('meetings')}
+        />
+        <StatCard
+          label="Prochain service"
+          value={
+            upcomingMasses[0] ? (
+              <span className="line-clamp-2 text-xl">{upcomingMasses[0].title}</span>
             ) : (
-              <p className="text-slate-600 mt-4 italic text-[11px] md:text-sm">Aucune messe programmée</p>
-            )}
-          </div>
-          <Church className="absolute -right-6 -bottom-6 w-32 h-32 text-white/5 group-hover:scale-110 transition-transform duration-500" />
-        </Card>
-      </div>
-
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <span className="text-base italic text-slate-600">Aucun service programmé</span>
+            )
+          }
+          hint={
+            upcomingMasses[0]
+              ? format(parseISO(upcomingMasses[0].date), 'EEEE dd MMM · HH:mm', { locale: fr })
+              : 'Programmez une célébration'
+          }
+          icon={CalendarDays}
+          onClick={() => onNavigate('masses')}
+        />
+      </div>      <section className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-4">
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -323,7 +297,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-slate-500 text-xs font-mono">{format(parseISO(mass.date), 'HH:mm')}</span>
                     <span className="w-1 h-1 bg-slate-800 rounded-full" />
-                    <span className="text-slate-500 text-xs uppercase font-bold tracking-widest" style={{fontSize: '8px'}}>PAROISSE ACTIVE</span>
+                    <span className="text-[8px] font-bold uppercase tracking-widest text-slate-500">{currentParish?.name || 'Paroisse'}</span>
                   </div>
                 </div>
                 <Button variant="ghost" className="p-2 h-auto rounded-xl" onClick={() => onNavigate('planning')}>
@@ -339,31 +313,46 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
         </div>
 
         <aside className="space-y-6">
-          <Card className="bg-gradient-to-br from-accent/10 to-transparent border-accent/20 cursor-pointer hover:border-accent group" onClick={() => onNavigate('stats')}>
-            <h4 className="text-sm font-bold text-accent mb-2 uppercase tracking-wide">Rappel Système</h4>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Vérifiez les présences 15 minutes avant le début de chaque service pour garantir l'éligibilité.
+          <Card
+            className="group cursor-pointer border-accent/20 bg-gradient-to-br from-accent/10 to-transparent hover:border-accent"
+            onClick={() => onNavigate('stats')}
+          >
+            <SectionTitle icon={BarChart3}>Aide du jour</SectionTitle>
+            <p className="mt-3 text-xs leading-relaxed text-slate-400">
+              Vérifiez les présences 15 minutes avant chaque service pour garantir l'éligibilité des lecteurs.
             </p>
-            <div className="mt-4 pt-4 border-t border-slate-800/50">
-              <div className="flex justify-between items-center text-[11px] font-bold">
-                <span className="text-slate-500 uppercase">Taux de présence global</span>
-                <span className="text-white group-hover:text-accent transition-colors">{globalAttendanceRate}%</span>
-              </div>
+            <div className="mt-4 flex items-center justify-between border-t border-slate-800/50 pt-4 text-[11px] font-bold">
+              <span className="uppercase tracking-wider text-slate-500">Taux de présence global</span>
+              <span className="text-white transition-colors group-hover:text-accent">{globalAttendanceRate}%</span>
             </div>
+            <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-accent">Voir les statistiques →</p>
           </Card>
-          
+
           <Card className="bg-slate-900/50">
-            <h4 className="text-sm font-bold text-white mb-4 italic tracking-widest uppercase">Statistiques</h4>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center bg-background/50 p-3 rounded-xl">
-                 <span className="text-xs text-slate-500">Lecteurs enregistrés</span>
-                 <span className="text-xs font-mono text-white tracking-widest">{readers.length}</span>
+            <SectionTitle icon={CalendarRange}>Prochaine réunion</SectionTitle>
+            {upcomingMeetings[0] ? (
+              <div className="mt-3 rounded-xl border border-slate-800 bg-background/60 p-4">
+                <p className="text-sm font-bold text-white">{upcomingMeetings[0].title}</p>
+                <p className="mt-1 text-[11px] font-bold uppercase tracking-widest text-accent">
+                  {format(parseISO(upcomingMeetings[0].date), 'EEEE dd MMMM · HH:mm', { locale: fr })}
+                </p>
+                {upcomingMeetings[0].location && (
+                  <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
+                    <MapPin size={12} /> {upcomingMeetings[0].location}
+                  </p>
+                )}
               </div>
-              <div className="flex justify-between items-center bg-background/50 p-3 rounded-xl">
-                 <span className="text-xs text-slate-500">Missions terminées</span>
-                 <span className="text-xs font-mono text-white tracking-widest">{trainedReaders}</span>
-              </div>
-            </div>
+            ) : (
+              <p className="mt-3 rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs italic text-slate-600">
+                Aucune réunion programmée.
+              </p>
+            )}
+            <button
+              onClick={() => onNavigate('meetings')}
+              className="mt-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 transition-colors hover:text-accent"
+            >
+              Gérer les réunions →
+            </button>
           </Card>
         </aside>
       </section>
@@ -540,7 +529,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
   };
 
   const deleteReader = async (id: string) => {
-    if (!confirm("Êtes-vous sûr de vouloir supprimer ce lecteur ? Cette action est irréversible.")) return;
+    if (!(await confirmAsync("Supprimer ce lecteur ? Cette action est irréversible.", "Supprimer"))) return;
     try {
       await deleteDoc(doc(db, 'readers', id));
       toast.success("Lecteur supprimé");
@@ -561,33 +550,33 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
 
   return (
     <div className="space-y-8 pb-32">
-      <header className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div>
-          <h2 className="text-2xl md:text-3xl font-bold text-white">Répertoire</h2>
-          <p className="text-slate-500 font-medium text-xs md:text-sm">{readers.length} lecteurs enregistrés</p>
-        </div>
-        <div className="flex gap-2">
-          <Button 
-            onClick={() => generateGlobalStatsPDF(readers, attendance, Object.values(plannings), masses, feedbacks, currentParish?.name || "lecApp")}
-            variant="secondary"
-            className="p-3 md:px-4 rounded-xl text-xs gap-2"
-          >
-            <FileDown size={18} /> <span className="hidden md:inline">Stats Globales</span>
-          </Button>
-          <div className="relative flex-1 md:w-64">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input 
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Rechercher..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 pl-10 pr-4 text-sm text-white outline-none focus:border-accent"
-            />
-          </div>
-          <Button onClick={() => setShowAdd(true)} variant="accent" className="p-3 md:p-4 rounded-2xl">
-            <UserPlus size={20} />
-          </Button>
-        </div>
-      </header>
+      <PageHeader
+        title="Lecteurs"
+        description={`${readers.length} lecteur(s) enregistré(s)`}
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              className="text-xs"
+              onClick={() => generateGlobalStatsPDF(readers, attendance, Object.values(plannings), masses, feedbacks, currentParish?.name || "lecApp")}
+            >
+              <FileDown size={16} /> <span className="hidden sm:inline">Exporter</span>
+            </Button>
+            <div className="relative w-full sm:w-64">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Rechercher un lecteur..."
+                className="w-full bg-background border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-slate-600 outline-none focus:border-accent"
+              />
+            </div>
+            <Button variant="accent" onClick={() => setShowAdd(true)}>
+              <UserPlus size={18} /> <span className="hidden sm:inline">Nouveau lecteur</span>
+            </Button>
+          </>
+        }
+      />
 
       <AnimatePresence>
         {showAdd && (
@@ -903,7 +892,7 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     const missingRequired = requiredRoles.filter(r => !assignedRoles.includes(r));
 
     if (missingRequired.length > 0) {
-      if (!confirm(`Le planning est incomplet (rôles obligatoires manquants). Voulez-vous quand même le finaliser ?`)) return;
+      if (!(await confirmAsync("Le planning est incomplet (rôles obligatoires manquants). Finaliser quand même ?", "Finaliser"))) return;
     }
     
     try {
@@ -986,7 +975,7 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
         </div>
         <div className="flex justify-between items-start">
           <div>
-            <h2 className="text-3xl font-bold text-white tracking-tight">{selectedMass.title}</h2>
+            <h2 className="text-xl font-black uppercase italic tracking-tight text-white">{selectedMass.title}</h2>
             <p className="text-slate-500 font-mono text-sm uppercase tracking-widest mt-1">
               {format(parseISO(selectedMass.date), 'EEEE d MMMM HH:mm', { locale: fr })}
             </p>
@@ -1181,10 +1170,10 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <header>
-        <h2 className="text-3xl font-bold text-white tracking-tight">Planification</h2>
-        <p className="text-slate-500 font-medium">Attribuez les rôles : Commentateur, Lectures, Prières.</p>
-      </header>
+      <PageHeader
+        title="Planning des lectures"
+        description="Attribuez les rôles : commentaire, lectures et prière universelle."
+      />
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {masses.map(mass => {
@@ -1282,21 +1271,21 @@ const MeetingView = ({ parishId }: { parishId: string }) => {
   };
 
   const deleteMeeting = async (id: string) => {
-    if (!confirm("Supprimer cette réunion ?")) return;
+    if (!(await confirmAsync("Supprimer cette réunion ?", "Supprimer"))) return;
     try { await deleteDoc(doc(db, 'meetings', id)); } catch (e) { handleFirestoreError(e, OperationType.DELETE, `meetings/${id}`); }
   };
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <header className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight italic uppercase">Réunions</h2>
-          <p className="text-slate-500 font-medium">Organisez vos rencontres et répétitions.</p>
-        </div>
-        <Button onClick={() => setShowAdd(true)} variant="accent" className="rounded-2xl">
-          <CalendarRange size={18} /> Organiser
-        </Button>
-      </header>
+      <PageHeader
+        title="Réunions"
+        description="Organisez vos rencontres et répétitions."
+        actions={
+          <Button variant="accent" onClick={() => setShowAdd(true)}>
+            <CalendarRange size={18} /> Organiser
+          </Button>
+        }
+      />
 
       {showAdd && (
         <Card className="p-8 border-accent/20 bg-accent/5">
@@ -1419,15 +1408,15 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <header className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight italic uppercase">Critiques & Retours</h2>
-          <p className="text-slate-500 font-medium">Améliorez la qualité des prestations.</p>
-        </div>
-        <Button onClick={() => setShowAdd(true)} variant="accent" className="rounded-2xl">
-          <MessageSquare size={18} /> Nouveau retour
-        </Button>
-      </header>
+      <PageHeader
+        title="Retours"
+        description="Recueillez les impressions des fidèles pour améliorer les prestations."
+        actions={
+          <Button variant="accent" onClick={() => setShowAdd(true)}>
+            <MessageSquare size={18} /> Nouveau retour
+          </Button>
+        }
+      />
 
       {showAdd && (
         <Card className="p-8 border-accent/20 bg-accent/5">
@@ -1566,10 +1555,10 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-2xl font-bold text-white">Gestion de la formation</h2>
-        <p className="text-slate-500">Suivi en temps réel de la formation des lecteurs</p>
-      </header>
+      <PageHeader
+        title="Formation"
+        description="Suivez en temps réel la progression de chaque lecteur."
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {readers.map(reader => (
@@ -1654,63 +1643,121 @@ const TreasuryView = ({ readers, parishId }: { readers: Reader[], parishId: stri
 
   const grandTotal = useMemo(() => filteredContributions.reduce((sum, c) => sum + c.amount, 0), [filteredContributions]);
 
+  const contributingReaders = useMemo(
+    () =>
+      readers
+        .map((reader) => {
+          const items = filteredContributions.filter((c) => c.readerId === reader.id);
+          return { reader, items, total: items.reduce((s, c) => s + c.amount, 0) };
+        })
+        .filter((row) => row.items.length > 0)
+        .sort((a, b) => b.total - a.total),
+    [readers, filteredContributions]
+  );
+
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-black text-white italic uppercase tracking-tight">Trésorerie</h2>
-      
-      <div className="flex gap-4 mb-4">
-        <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-slate-800 p-2 rounded text-white">
-            {[...Array(12).keys()].map(i => <option key={i+1} value={i+1}>{i+1}</option>)}
-        </select>
-        <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-slate-800 p-2 rounded text-white">
-            <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
-        </select>
+      <PageHeader
+        title="Trésorerie"
+        description="Suivez les contributions mensuelles des lecteurs."
+        actions={
+          <div className="flex items-center gap-2">
+            <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="w-40">
+              {MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </Select>
+            <Select value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-28">
+              {AVAILABLE_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            </Select>
+          </div>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard
+          label={`Solde — ${MONTH_NAMES[month - 1]} ${year}`}
+          value={`${grandTotal.toLocaleString('fr-FR')} CDF`}
+          hint={`${filteredContributions.length} contribution(s)`}
+          icon={Wallet}
+          tone="accent"
+        />
+
+        <Card className="md:col-span-2">
+          <SectionTitle icon={Plus}>Enregistrer une contribution</SectionTitle>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Field label="Lecteur">
+              <Select value={selectedReaderId} onChange={(e) => setSelectedReaderId(e.target.value)}>
+                <option value="">Choisir un lecteur</option>
+                {readers.map(r => <option key={r.id} value={r.id}>{r.prenom} {r.name} {r.postnom}</option>)}
+              </Select>
+            </Field>
+            <Field label="Montant (CDF)">
+              <Input
+                type="number"
+                min="0"
+                value={newAmount || ''}
+                onChange={e => setNewAmount(Number(e.target.value))}
+                placeholder="ex : 5 000"
+              />
+            </Field>
+            <div className="flex items-end">
+              <Button
+                variant="accent"
+                className="w-full py-3"
+                disabled={!selectedReaderId || newAmount <= 0}
+                onClick={addContribution}
+              >
+                Enregistrer
+              </Button>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800/50">
-        <p className="text-slate-400">Solde total du mois: <span className="text-white font-bold text-lg">{grandTotal} CDF</span></p>
-      </div>
+      <SectionTitle
+        icon={Wallet}
+        action={<span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Total {grandTotal.toLocaleString('fr-FR')} CDF</span>}
+      >
+        Détail par lecteur
+      </SectionTitle>
 
-      <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800/50 space-y-4">
-        <h3 className="text-xl font-bold text-white">Ajouter une contribution</h3>
-        <div className="flex gap-4">
-          <select value={selectedReaderId} onChange={(e) => setSelectedReaderId(e.target.value)} className="bg-slate-800 p-2 rounded text-white">
-            <option value="">Sélectionner un lecteur</option>
-            {readers.map(r => <option key={r.id} value={r.id}>{r.prenom} {r.name}</option>)}
-          </select>
-          <input type="number" value={newAmount} onChange={(e) => setNewAmount(Number(e.target.value))} className="bg-slate-800 p-2 rounded text-white" placeholder="Montant" />
-          <button onClick={addContribution} className="bg-accent text-midnight p-2 rounded font-bold">Ajouter</button>
-        </div>
-      </div>
-      
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-slate-300">
-          <thead>
-            <tr>
-              <th className="p-3">Lecteur</th>
-              <th className="p-3">Montant</th>
-              <th className="p-3">Actions</th>
+      <div className="overflow-x-auto rounded-2xl border border-slate-800/60 bg-card">
+                <table className="w-full border-collapse text-left">
+          <thead className="bg-slate-950/60">
+            <tr className="border-b border-slate-800">
+              <th className="p-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Lecteur</th>
+              <th className="p-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Contributions</th>
+              <th className="p-3 text-right text-[10px] font-black uppercase tracking-widest text-slate-500">Total</th>
             </tr>
           </thead>
-          <tbody>
-            {readers.map(reader => {
-                const readerContribs = filteredContributions.filter(c => c.readerId === reader.id);
-                const total = readerContribs.reduce((sum, c) => sum + c.amount, 0);
-                return (
-                    <tr key={reader.id} className="border-t border-slate-800">
-                      <td className="p-3">{reader.prenom} {reader.name}</td>
-                      <td className="p-3 font-bold">{total} CDF</td>
-                      <td className="p-3">
-                          {readerContribs.map(c => (
-                              <div key={c.id} className="flex gap-2 items-center mb-1">
-                                 {c.amount} CDF
-                                 <button onClick={() => deleteContribution(c.id!)} className="text-red-500 hover:text-red-300 font-bold ml-2">X</button>
-                              </div>
-                          ))}
-                      </td>
-                    </tr>
-                )
-            })}
+          <tbody className="divide-y divide-slate-800/60">
+            {contributingReaders.length === 0 && (
+              <tr>
+                <td colSpan={3} className="p-10 text-center text-sm italic text-slate-600">
+                  Aucune contribution enregistrée pour cette période.
+                </td>
+              </tr>
+            )}
+            {contributingReaders.map(({ reader, items, total }) => (
+              <tr key={reader.id} className="transition-colors hover:bg-slate-900/40">
+                <td className="p-3 text-sm font-semibold text-white">{reader.prenom} {reader.name} {reader.postnom}</td>
+                <td className="p-3 space-y-1">
+                  {items.map(c => (
+                    <div key={c.id} className="flex items-center gap-3 text-xs text-slate-400">
+                      <span className="text-slate-600">{c.date ? format(parseISO(c.date), 'd/MM/yyyy', { locale: fr }) : '—'}</span>
+                      <span className="font-mono">{c.amount.toLocaleString('fr-FR')} CDF</span>
+                      <button
+                        onClick={() => deleteContribution(c.id)}
+                        className="text-slate-600 transition-colors hover:text-red-500"
+                        title="Supprimer cette contribution"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </td>
+                <td className="p-3 text-right font-mono text-sm font-bold text-accent">{total.toLocaleString('fr-FR')} CDF</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -1803,13 +1850,17 @@ const ReportsView = ({
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <header className="flex flex-col gap-2">
-        <h2 className="text-3xl font-black text-white tracking-tight italic uppercase">Centre de Rapports</h2>
-        <div className="p-4 bg-slate-900 rounded-xl">
-            <h4 className="text-white font-bold mb-2">Ajouter un rapport PDF</h4>
-            <input type="file" onChange={handlePdfUpload} className="text-slate-300" />
-        </div>
-      </header>
+      <PageHeader
+        title="Rapports"
+        description="Générez et archivez les documents PDF de la paroisse."
+        actions={
+          <label className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs font-semibold text-slate-300 hover:border-accent/40 hover:text-white transition-colors cursor-pointer">
+            <Paperclip size={16} className="text-accent" />
+            Ajouter un PDF
+            <input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} />
+          </label>
+        }
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <Card className="flex flex-col justify-between p-8 space-y-6 bg-slate-900/30 border-slate-800/40 hover:border-accent/40 transition-all border-2">
@@ -2002,50 +2053,44 @@ const ReaderStatsView = ({ readers, masses, parishId }: { readers: Reader[], mas
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight italic uppercase leading-none">Tableau Analytique</h2>
-          <p className="text-slate-500 font-medium text-sm mt-2">Visibilité sur la performance et l'engagement de la communauté.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button 
-            variant="secondary" 
-            className="text-xs h-10"
-            onClick={() => {
+      <PageHeader
+        title="Statistiques"
+        description="Présences, participation et engagement de la communauté."
+        actions={
+          <>
+            <Button variant="secondary" className="text-xs" onClick={() => {
               if (selectedReaderId && selectedReader) {
                 generateReaderStatsPDF(selectedReader, readerAttendance, readerAssignments, masses, feedbacks.filter(f => f.readerId === selectedReaderId), currentParish?.name || "lecApp");
               } else {
                 generateGlobalStatsPDF(readers, attendance, plannings, masses, feedbacks, currentParish?.name || "lecApp");
               }
-            }}
-          >
-            <FileDown size={14} /> Télécharger Rapport
-          </Button>
-          <div className="bg-slate-900/50 border border-slate-800 p-1 rounded-2xl flex gap-1">
-            <button 
-              onClick={() => setSelectedReaderId('')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${!selectedReaderId ? 'bg-accent text-midnight' : 'text-slate-500'}`}
-            >
-              GLOBAL
-            </button>
-            <div className="relative">
-              <select 
-                value={selectedReaderId}
-                onChange={(e) => setSelectedReaderId(e.target.value)}
-                className={`px-4 py-2 pr-8 rounded-xl text-xs font-bold appearance-none bg-transparent outline-none transition-all cursor-pointer ${selectedReaderId ? 'bg-accent text-midnight' : 'text-slate-500'}`}
+            }}>
+              <FileDown size={14} /> Télécharger
+            </Button>
+            <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1">
+              <button
+                onClick={() => setSelectedReaderId('')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${!selectedReaderId ? 'bg-accent text-midnight' : 'text-slate-500 hover:text-slate-300'}`}
               >
-                <option value="" disabled className="text-slate-900 bg-white">LECTEUR...</option>
-                {readers.sort((a,b) => a.prenom.localeCompare(b.prenom)).map(r => (
-                  <option key={r.id} value={r.id} className="text-slate-900 bg-white">
-                    {r.prenom} {r.name[0]}.
-                  </option>
-                ))}
-              </select>
-              <ChevronRight size={14} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none rotate-90" />
+                GLOBAL
+              </button>
+              <div className="relative">
+                <select
+                  value={selectedReaderId}
+                  onChange={(e) => setSelectedReaderId(e.target.value)}
+                  className={`px-3 py-1.5 pr-7 rounded-lg text-xs font-bold bg-transparent outline-none cursor-pointer ${selectedReaderId ? 'bg-accent text-midnight' : 'text-slate-500'}`}
+                >
+                  <option value="" disabled>LECTEUR…</option>
+                  {[...readers].sort((a, b) => a.prenom.localeCompare(b.prenom)).map(r => (
+                    <option key={r.id} value={r.id}>{r.prenom} {r.name[0]}.</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500" />
+              </div>
             </div>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {!selectedReaderId ? (
         // GLOBAL DASHBOARD
@@ -2403,7 +2448,7 @@ const PresenceView = ({ masses, readers, parishId }: { masses: Mass[], readers: 
 
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-3xl font-bold text-white tracking-tight uppercase italic">{selectedEvent.type === 'mass' ? 'Office' : 'Réunion'}</h2>
+            <h2 className="text-xl font-black uppercase italic tracking-tight text-white">{selectedEvent.type === 'mass' ? 'Office' : 'Réunion'}</h2>
             <p className="text-slate-500 font-bold uppercase tracking-widest mt-1">{(eventData as any).title}</p>
           </div>
           <div className="text-right">
@@ -2498,16 +2543,26 @@ const PresenceView = ({ masses, readers, parishId }: { masses: Mass[], readers: 
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <header className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight italic uppercase">Présences</h2>
-          <p className="text-slate-500 font-medium">Sélectionnez l'évènement à valider.</p>
-        </div>
-        <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-2xl shadow-inner">
-           <button onClick={() => setActiveMode('mass')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all tracking-widest ${activeMode === 'mass' ? 'bg-accent text-midnight shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Messes</button>
-           <button onClick={() => setActiveMode('meeting')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all tracking-widest ${activeMode === 'meeting' ? 'bg-accent text-midnight shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Réunions</button>
-        </div>
-      </header>
+      <PageHeader
+        title="Présences"
+        description="Validez la présence des lecteurs à chaque célébration."
+        actions={
+          <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-1">
+            <button
+              onClick={() => setActiveMode('mass')}
+              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'mass' ? 'bg-accent text-midnight shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              Messes
+            </button>
+            <button
+              onClick={() => setActiveMode('meeting')}
+              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'meeting' ? 'bg-accent text-midnight shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              Réunions
+            </button>
+          </div>
+        }
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {activeMode === 'mass' ? masses.map(mass => (
@@ -2757,15 +2812,15 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <header className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight">Calendrier Liturgique</h2>
-          <p className="text-slate-500 font-medium">Programmation des célébrations et offices.</p>
-        </div>
-        <Button onClick={() => setShowAdd(true)} variant="accent" className="p-4 rounded-2xl">
-          <CalendarDays size={24} />
-        </Button>
-      </header>
+      <PageHeader
+        title="Messes & Offices"
+        description="Programmez les célébrations et leurs textes liturgiques."
+        actions={
+          <Button variant="accent" onClick={() => setShowAdd(true)}>
+            <CalendarDays size={18} /> Nouvelle célébration
+          </Button>
+        }
+      />
 
       <AnimatePresence>
         {showAdd && (
@@ -3601,7 +3656,9 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
   );
 };
 
-const AuthView = ({ onLogin, onRegisterParish, onBack, onResetPassword }: { onLogin: () => void, onRegisterParish: () => void, onBack: () => void, onResetPassword: () => void }) => {
+const AuthView = ({ onLogin, onRegisterParish, onBack, onResetPassword }: { onLogin: () => void, onRegisterParish: () => void, onBack: () => void, onResetPassword: (email: string) => void }) => {
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-8 relative overflow-hidden">
        <button onClick={onBack} className="absolute top-8 left-8 text-slate-500 hover:text-white flex items-center gap-2 font-bold uppercase tracking-widest text-[10px] transition-colors z-20">
@@ -3629,12 +3686,34 @@ const AuthView = ({ onLogin, onRegisterParish, onBack, onResetPassword }: { onLo
               <Button onClick={onLogin} variant="accent" className="w-full py-5 text-sm rounded-2xl font-bold">
                  Accès Admin Google
               </Button>
-              <button 
-                onClick={onResetPassword}
-                className="text-[10px] font-bold text-slate-600 uppercase tracking-widest hover:text-accent transition-colors pt-2 block mx-auto"
-              >
-                Mot de passe compte oublié ?
-              </button>
+              {showReset ? (
+                <div className="space-y-2 pt-2">
+                  <input
+                    type="email"
+                    autoFocus
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && onResetPassword(resetEmail)}
+                    placeholder="votre@email.com"
+                    className="w-full rounded-xl border border-slate-800 bg-background px-4 py-2.5 text-center text-sm text-white placeholder:text-slate-600 outline-none focus:border-accent"
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="accent" className="flex-1 py-2.5 text-xs" onClick={() => onResetPassword(resetEmail)} disabled={!resetEmail}>
+                      Envoyer
+                    </Button>
+                    <Button variant="ghost" className="py-2.5 text-xs" onClick={() => setShowReset(false)}>
+                      Annuler
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowReset(true)}
+                  className="mx-auto block pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600 transition-colors hover:text-accent"
+                >
+                  Mot de passe compte oublié ?
+                </button>
+              )}
             </div>
 
             <div className="relative">
@@ -3666,23 +3745,21 @@ const SuperAdminView = ({ parishes, onDeleteParish, onEnterParish }: { parishes:
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-3xl font-black text-white tracking-tight italic uppercase">Administration Générale</h2>
-          <p className="text-slate-500 font-medium">Gestion globale des paroisses enregistrées.</p>
-        </div>
-        <div className="relative w-full md:w-72">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-          <input 
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Rechercher une paroisse..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 pl-10 pr-4 text-sm text-white outline-none focus:border-accent"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <PageHeader
+        title="Administration générale"
+        description="Gestion globale des paroisses enregistrées."
+        actions={
+          <div className="relative w-full md:w-72">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher une paroisse..."
+              className="w-full bg-background border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-slate-600 outline-none focus:border-accent"
+            />
+          </div>
+        }
+      />      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="bg-accent/5 border-accent/20">
           <p className="text-accent text-xs font-bold uppercase tracking-widest">Total Paroisses</p>
           <h2 className="text-4xl font-bold text-white mt-4">{parishes.length}</h2>
@@ -3894,9 +3971,11 @@ export default function App() {
     }
   };
 
-  const handleResetPassword = async () => {
-    const email = window.prompt("Veuillez entrer votre adresse e-mail pour réinitialiser votre mot de passe :");
-    if (!email) return;
+  const handleResetPassword = async (email: string) => {
+    if (!email || !email.includes('@')) {
+      toast.error("Veuillez saisir une adresse e-mail valide.");
+      return;
+    }
 
     try {
       await sendPasswordResetEmail(auth, email);
@@ -4124,9 +4203,9 @@ export default function App() {
     } catch (error: any) {
       console.error("Erreur détaillée lors de la connexion:", error);
       if (error.code === 'auth/popup-blocked') {
-        alert("La fenêtre de connexion a été bloquée. Veuillez autoriser les popups.");
+        toast.error("La fenêtre de connexion a été bloquée. Veuillez autoriser les popups.");
       } else {
-        alert("Impossible de se connecter : " + (error.message || "Erreur inconnue"));
+        toast.error("Impossible de se connecter : " + (error.message || "Erreur inconnue"));
       }
     }
   };
@@ -4147,7 +4226,7 @@ export default function App() {
         unlockParish(currentParish.id);
         setActiveTab('dashboard');
       } else {
-        alert("Mot de passe incorrect.");
+        toast.error("Mot de passe incorrect.");
       }
     }
   };
@@ -4201,7 +4280,7 @@ export default function App() {
       setCurrentParish(null);
       setParishLoggedIn(false);
       setIsDeletingParish(null);
-      alert("Paroisse supprimée avec succès.");
+      toast.success("Paroisse supprimée avec succès.");
     } catch (e) {
       console.error("Deletion error:", e);
       handleFirestoreError(e, OperationType.DELETE, `parishes/${parishId}`);
@@ -4708,130 +4787,203 @@ export default function App() {
       <div className="min-h-screen bg-background flex flex-col md:flex-row">
         
         {/* Sidebar */}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-primary border-r border-slate-800 flex flex-col transition-transform duration-300 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-          <div className="p-8 flex items-center justify-between">
-            <Logo className="w-12 h-12" />
-            <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-500 hover:text-white">
-               <X size={24} />
+        <aside
+          className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-slate-800 bg-primary transition-transform duration-300 md:translate-x-0 ${
+            isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 px-5 py-5">
+            <Logo className="w-10 h-10" />
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-800 hover:text-white md:hidden"
+              aria-label="Fermer le menu"
+            >
+              <X size={20} />
             </button>
           </div>
 
-          <nav className="flex-1 px-4 mt-4 space-y-1 overflow-y-auto custom-scrollbar">
+          {currentParish && (
+            <div className="mx-4 mb-4 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+              <p className="truncate text-sm font-bold text-white">{currentParish.name}</p>
+              <p className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                {[currentParish.city, currentParish.diocese].filter(Boolean).join(' · ') || 'Espace paroisse'}
+              </p>
+            </div>
+          )}
+
+          <nav className="custom-scrollbar flex-1 space-y-5 overflow-y-auto px-3 pb-4">
             {isSuperAdmin && (
-              <>
-                <button
-                  onClick={() => {
-                    setCurrentParish(null);
-                    setSuperAdminParishView(false);
-                    setView('landing');
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${!currentParish && !superAdminParishView ? 'bg-accent/10 text-accent font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-                >
-                  <BarChart3 size={20} />
-                  Dashboard Global
-                </button>
-              </>
+              <button
+                onClick={() => {
+                  setCurrentParish(null);
+                  setSuperAdminParishView(false);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all ${
+                  !currentParish && !superAdminParishView
+                    ? 'bg-accent font-bold text-midnight shadow-lg shadow-accent/20'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+              >
+                <BarChart3 size={17} />
+                Toutes les paroisses
+              </button>
             )}
 
-            <div className="py-4">
-              <p className="px-4 text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">Gestion</p>
-              <nav className="space-y-1">
-                {[
-                  { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
-                  { id: 'readers', label: 'Lecteurs', icon: Users },
-                  { id: 'masses', label: 'Messes', icon: Church },
-                  { id: 'planning', label: 'Plannings', icon: CalendarDays },
-                  { id: 'attendance', label: 'Présences', icon: CheckSquare },
-                  { id: 'training', label: 'Formation', icon: BookOpen },
-                  { id: 'treasury', label: 'Trésorerie', icon: Wallet },
-                  { id: 'meetings', label: 'Réunions', icon: CalendarRange },
-                  { id: 'feedback', label: 'Retours', icon: MessageSquare },
-                  { id: 'excuses', label: 'Excuses', icon: AlertCircle },
-                  { id: 'reports', label: 'Rapports', icon: FileDown },
-                  { id: 'settings', label: 'Paramètres', icon: Settings }
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      if (currentParish && (isSuperAdmin || canManage(currentParish))) {
-                        setParishLoggedIn(true);
-                      }
-                      setIsMobileMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === item.id ? 'bg-accent text-midnight font-bold shadow-lg shadow-accent/20' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-                  >
-                    <item.icon size={20} />
-                    {item.label}
-                  </button>
-                ))}
-              </nav>
-            </div>
+            {NAV_GROUPS.map((group) => (
+              <div key={group.label}>
+                <p className="mb-1.5 px-3 text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                  {group.label}
+                </p>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const active = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          if (currentParish && (isSuperAdmin || canManage(currentParish))) {
+                            setParishLoggedIn(true);
+                          }
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all ${
+                          active
+                            ? 'bg-accent font-bold text-midnight shadow-lg shadow-accent/20'
+                            : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        <Icon size={17} className={active ? '' : 'text-slate-500 group-hover:text-slate-300'} />
+                        <span className="truncate">{item.label}</span>
+                        {item.id === 'settings' && pendingRequestsCount > 0 && (
+                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                            {pendingRequestsCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
-          <div className="p-4 border-t border-slate-800 space-y-2">
-             <button 
+          <div className="space-y-2 border-t border-slate-800 p-3">
+            {currentParish && (
+              <button
+                onClick={() => {
+                  setCurrentParish(null);
+                  setActiveTab('dashboard');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-400 transition-all hover:bg-slate-800 hover:text-slate-200"
+              >
+                <ArrowLeft size={17} />
+                Changer de paroisse
+              </button>
+            )}
+
+            <div className="flex items-center gap-3 rounded-xl bg-slate-900/60 px-3 py-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/20 text-accent">
+                <UserCircle size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-bold text-white">
+                  {user?.displayName || (user?.email ? user.email.split('@')[0] : 'Invité')}
+                </p>
+                <p className="truncate text-[9px] font-bold uppercase tracking-widest text-slate-500">
+                  {isSuperAdmin ? 'Super Admin' : 'Compte administrateur'}
+                </p>
+              </div>
+            </div>
+
+            <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 transition-all font-bold"
-             >
-               <LogIn size={20} className="rotate-180" />
-               Déconnexion
-             </button>
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-red-400 transition-all hover:bg-red-500/10"
+            >
+              <LogIn size={17} className="rotate-180" />
+              Déconnexion
+            </button>
           </div>
         </aside>
 
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+
         {/* Main Content */}
         <main className="flex-1 md:ml-72 min-h-screen relative">
-          <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-slate-800 px-6 py-4 flex items-center justify-between">
-             <div className="flex items-center gap-4">
-                <button 
-                  onClick={() => setIsMobileMenuOpen(true)}
-                  className="md:hidden text-slate-400 hover:text-white"
-                >
-                  <Menu size={24} />
-                </button>
-                <div>
-                   <h2 className="text-white font-bold text-lg tracking-tight italic uppercase">
-                     {activeTab === 'dashboard' ? 'Tableau de bord' : 
-                      activeTab === 'readers' ? 'Lecteurs' : 
-                      activeTab === 'masses' ? 'Messes' : 
-                      activeTab === 'planning' ? 'Plannings' : 
-                      activeTab === 'attendance' ? 'Présences' : 
-                      activeTab === 'meetings' ? 'Réunions' :
-                      activeTab === 'feedback' ? 'Retours' :
-                      activeTab === 'reports' ? 'Rapports' :
-                      'Paramètres'}
-                   </h2>
-                   <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">
-                     {currentParish?.name || 'Vue Globale'}
-                   </p>
-                </div>
-             </div>
+          <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-slate-800 bg-background/85 px-4 py-3 backdrop-blur-xl md:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white md:hidden"
+                aria-label="Ouvrir le menu"
+              >
+                <Menu size={20} />
+              </button>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-white">
+                  {currentParish?.name || 'Administration générale'}
+                </p>
+                <p className="truncate text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  {activeTab === 'superadmin' ? 'Toutes les paroisses' : getNavItem(activeTab).label}
+                </p>
+              </div>
+            </div>
 
-             <div className="flex items-center gap-3">
-                {isSuperAdmin && pendingRequestsCount > 0 && (
-                   <button 
-                    onClick={() => { setActiveTab('settings'); setSuperAdminParishView(false); }}
-                    className="relative p-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/20 transition-all"
-                   >
-                     <Bell size={20} fill="currentColor" />
-                     <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-background">
-                       {pendingRequestsCount}
-                     </span>
-                   </button>
-                )}
-                <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-2xl py-1.5 pl-1.5 pr-3">
-                   <div className="w-8 h-8 bg-accent/20 rounded-xl flex items-center justify-center text-accent">
-                      <UserCircle size={20} />
-                   </div>
-                   <div className="text-left hidden sm:block">
-                      <p className="text-[10px] text-white font-bold leading-none">
-                        {user?.displayName || (user?.email ? user.email.split('@')[0] : 'Admin')}
-                      </p>
-                      <p className="text-[8px] text-slate-500 uppercase font-bold tracking-tighter mt-0.5">{isSuperAdmin ? 'Super Admin' : 'Paroisse'}</p>
-                   </div>
-                </div>
-             </div>
+            <div className="flex items-center gap-2">
+              {pendingRequestsCount > 0 && (
+                <button
+                  onClick={() => {
+                    setActiveTab('settings');
+                    setSuperAdminParishView(false);
+                  }}
+                  className="relative rounded-xl bg-red-500/10 p-2 text-red-500 transition-all hover:bg-red-500/20"
+                  aria-label="Demandes de code en attente"
+                >
+                  <Bell size={18} fill="currentColor" />
+                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-background bg-red-500 text-[10px] font-bold text-white">
+                    {pendingRequestsCount}
+                  </span>
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  setActiveTab('settings');
+                  setSuperAdminParishView(false);
+                }}
+                className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900 py-1.5 pl-1.5 pr-3 transition-colors hover:border-slate-700"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent/20 text-accent">
+                  <UserCircle size={18} />
+                </span>
+                <span className="hidden text-left sm:block">
+                  <span className="block text-[10px] font-bold leading-none text-white">
+                    {user?.displayName || (user?.email ? user.email.split('@')[0] : 'Admin')}
+                  </span>
+                  <span className="mt-0.5 block text-[8px] font-bold uppercase tracking-tighter text-slate-500">
+                    {isSuperAdmin ? 'Super Admin' : 'Paramètres'}
+                  </span>
+                </span>
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="hidden rounded-xl p-2 text-slate-500 transition-colors hover:bg-red-500/10 hover:text-red-400 md:block"
+                aria-label="Se déconnecter"
+                title="Déconnexion"
+              >
+                <LogIn size={18} className="rotate-180" />
+              </button>
+            </div>
           </header>
 
           <AnimatePresence mode="wait">
@@ -4840,7 +4992,7 @@ export default function App() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="p-6 md:p-10"
+              className="mx-auto w-full max-w-[1500px] px-4 pb-24 pt-6 md:px-8 md:pb-12"
             >
               {!currentParish && isSuperAdmin && !superAdminParishView ? <SuperAdminView parishes={parishes} onDeleteParish={deleteParish} onEnterParish={(p) => { setCurrentParish(p); setParishLoggedIn(true); setSuperAdminParishView(true); setActiveTab('dashboard'); }} /> : (
                 <div className="space-y-8">
@@ -4898,10 +5050,10 @@ export default function App() {
                   )}
                   {activeTab === 'settings' && currentParish && (
                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                      <div className="flex flex-col gap-2">
-                        <h2 className="text-3xl font-black text-white tracking-tight italic uppercase">Paramètres</h2>
-                        <p className="text-slate-500 font-medium tracking-tight">Gérez la sécurité et les informations de votre paroisse.</p>
-                      </div>
+                      <PageHeader
+                        title="Paramètres"
+                        description="Gérez la sécurité et les informations de votre paroisse."
+                      />
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-8">
@@ -5183,8 +5335,36 @@ export default function App() {
               )}
             </motion.div>
           </AnimatePresence>
-        </main>
-      </div>
+            {/* Mobile bottom navigation */}
+            <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-slate-800 bg-primary/95 backdrop-blur-xl md:hidden">
+              {MOBILE_PRIMARY.map((item) => {
+                const Icon = item.icon;
+                const active = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      if (currentParish && (isSuperAdmin || canManage(currentParish))) setParishLoggedIn(true);
+                    }}
+                    className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                      active ? 'text-accent' : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <Icon size={18} />
+                    <span className="w-full truncate px-1">{item.label.split(' ')[0]}</span>
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] font-bold uppercase tracking-wider text-slate-500 transition-colors hover:text-slate-300"
+              >
+                <Menu size={18} />
+                Plus
+              </button>
+            </nav>
+        </main>      </div>
     );
   };
 

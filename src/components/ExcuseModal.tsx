@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Reader } from '../types';
 import { db } from '../lib/firebase';
 import { addDoc, collection } from 'firebase/firestore';
+import { toast } from 'sonner';
+import { Modal, Field, Select, Textarea, Button } from './ui';
 
 interface Props {
   isOpen: boolean;
@@ -16,53 +18,72 @@ export const ExcuseModal: React.FC<Props> = ({ isOpen, onClose, date, readers, p
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
-  if (!isOpen) return null;
-
   const handleSubmit = async () => {
-    if (!readerId || !message) {
-      alert("Veuillez remplir tous les champs.");
+    if (!readerId || !message.trim()) {
+      toast.error('Veuillez remplir tous les champs.');
       return;
     }
-    
+
     const excuseData = {
       parishId,
       readerId,
-      message,
+      message: message.trim(),
       date,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     setLoading(true);
     try {
-        console.log("Tentative d'envoi de l'excuse :", excuseData);
-        await addDoc(collection(db, 'excuses'), excuseData);
-        console.log("Excuse envoyée avec succès");
-        onClose();
+      await addDoc(collection(db, 'excuses'), excuseData);
+      toast.success("Votre excuse a bien été transmise à l'administration.");
+      setReaderId('');
+      setMessage('');
+      onClose();
     } catch (e: any) {
-        console.error("Erreur détaillée lors de l'envoi de l'excuse :", e);
-        console.error("Données envoyées :", excuseData);
-        alert(`Erreur lors de l'envoi : ${e.message || e}`);
+      console.error("Erreur lors de l'envoi de l'excuse :", e);
+      toast.error(`Erreur lors de l'envoi : ${e.message || e}`);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
-        <div className="bg-slate-900 p-4 sm:p-8 rounded-xl border border-slate-800 w-full max-w-sm sm:max-w-md overflow-hidden">
-            <h2 className="text-xl font-bold text-white mb-4">Présenter mes excuses</h2>
-            <select className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white mb-4" value={readerId} onChange={e => setReaderId(e.target.value)}>
-                <option value="">Sélectionner un lecteur</option>
-                {[...readers].sort((a, b) => 
-                  `${a.prenom || ''} ${a.name || ''} ${a.postnom || ''}`.localeCompare(`${b.prenom || ''} ${b.name || ''} ${b.postnom || ''}`)
-                ).map(r => <option key={r.id} value={r.id}>{`${r.prenom || ''} ${r.name || ''} ${r.postnom || ''}`.trim()}</option>)}
-            </select>
-            <textarea className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white mb-4" placeholder="Vos excuses..." value={message} onChange={e => setMessage(e.target.value)} />
-            <div className="flex justify-end gap-2">
-                <button onClick={onClose} className="text-slate-500 font-bold uppercase text-xs">Annuler</button>
-                <button onClick={handleSubmit} disabled={loading} className="bg-accent text-slate-950 font-bold uppercase text-xs px-4 py-2 rounded-lg">Envoyer</button>
-            </div>
+    <Modal isOpen={isOpen} onClose={onClose} title="Présenter mes excuses">
+      <div className="space-y-4">
+        <Field label="Lecteur concerné">
+          <Select value={readerId} onChange={(e) => setReaderId(e.target.value)}>
+            <option value="">Sélectionner un lecteur</option>
+            {[...readers]
+              .sort((a, b) =>
+                `${a.prenom || ''} ${a.name || ''} ${a.postnom || ''}`.localeCompare(
+                  `${b.prenom || ''} ${b.name || ''} ${b.postnom || ''}`,
+                ),
+              )
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {`${r.prenom || ''} ${r.name || ''} ${r.postnom || ''}`.trim()}
+                </option>
+              ))}
+          </Select>
+        </Field>
+
+        <Field label="Motif" hint="Votre message sera visible par l'administration de la paroisse.">
+          <Textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Expliquez brièvement la raison de votre absence..."
+          />
+        </Field>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button variant="accent" onClick={handleSubmit} loading={loading} disabled={!readerId || !message.trim()}>
+            Envoyer
+          </Button>
         </div>
-    </div>
+      </div>
+    </Modal>
   );
 };
