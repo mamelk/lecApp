@@ -36,6 +36,15 @@ export interface Reader {
   isActive: boolean;
   roles?: string[]; // Allowed roles for this reader
   trainingStatus?: TrainingStatus;
+  /** Validation de la condition "en ordre avec la discipline" avant tout classement */
+  disciplineValidated?: boolean;
+  disciplineValidatedAt?: string; // ISO
+  disciplineNote?: string;
+  /** Dernier envoi (ou renvoi) en formation pour lacunes constatées */
+  sentToTrainingAt?: string; // ISO
+  /** 'public' = inscription faite depuis la page de la paroisse, sans code admin */
+  registeredVia?: 'admin' | 'public';
+  createdAt?: string; // ISO
 }
 
 export interface Mass {
@@ -72,6 +81,18 @@ export interface Attendance {
 export interface ReaderAssignment {
   readerId: string;
   role: 'commentator' | 'reading1' | 'reading2' | 'universal_prayer';
+  /**
+   * Préparation liturgique du lecteur classé : répétition de la prestation,
+   * confession, préparation spirituelle. Confirmé le samedi (dernière
+   * réunion de préparation) uniquement quand tout est coché.
+   */
+  preparation?: {
+    rehearsal?: boolean; // Répétition de la prestation
+    confession?: boolean;
+    spiritual?: boolean;
+    confirmed?: boolean; // Confirmation du samedi
+    confirmedAt?: string; // ISO
+  };
 }
 
 export interface Planning {
@@ -80,6 +101,9 @@ export interface Planning {
   massId: string;
   assignments: ReaderAssignment[];
   isFinalized: boolean;
+  /** Date de dernière proposition automatique (si créée par le classement auto) */
+  proposedAt?: string; // ISO
+  proposedBy?: 'auto' | 'manual';
 }
 
 export interface Meeting {

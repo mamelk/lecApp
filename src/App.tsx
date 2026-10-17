@@ -56,7 +56,8 @@ import {
   Edit2,
   BookOpen,
   Wallet,
-  ChevronDown
+  ChevronDown,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -99,6 +100,7 @@ import {
   AttendanceStatus,
   Planning, 
   TrainingStatus,
+  ReaderAssignment,
   Meeting,
   Feedback,
   Excuse,
@@ -112,6 +114,7 @@ import { ExcuseModal } from './components/ExcuseModal';
 import { ExcusesView } from './components/ExcusesView';
 import { Button, Card, Badge, PageHeader, SectionTitle, StatCard, Field, Input, Select, EmptyState, Modal, inputClass } from './components/ui';
 import { NAV_GROUPS, NAV_ITEMS, getNavItem, MOBILE_PRIMARY, NavId } from './navigation';
+import { ROLES, evaluateEligibility, proposeRanking, requiredMeetingsFor, carryOverPreparation, rankingDateOf, emptyPreparation, autoProposePlanning, ReaderEligibility } from './lib/ranking';
 
 // --- Contexts ---
 const ParishContext = createContext<{
@@ -478,6 +481,30 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
     }
   };
 
+  /** Le responsable discipline valide (ou retire) un lecteur avant classement. */
+  const toggleDiscipline = async (reader: Reader) => {
+    const validated = reader.disciplineValidated !== true;
+    try {
+      if (validated) {
+        await updateDoc(doc(db, 'readers', reader.id), {
+          disciplineValidated: true,
+          disciplineValidatedAt: new Date().toISOString(),
+        });
+        toast.success(`${reader.prenom} ${reader.name} : discipline validée`);
+      } else {
+        if (!(await confirmAsync(`Retirer la validation discipline de ${reader.prenom} ${reader.name} ?`, 'Retirer'))) return;
+        await updateDoc(doc(db, 'readers', reader.id), {
+          disciplineValidated: false,
+          disciplineValidatedAt: null,
+        });
+        toast.warning('Validation discipline retirée');
+      }
+    } catch (e) {
+      toast.error('Mise à jour impossible.');
+      handleFirestoreError(e, OperationType.UPDATE, `readers/${reader.id}`);
+    }
+  };
+
   const addReader = async () => {
     if (!newName || !newPostnom || !newPrenom) return;
     setLoading(true);
@@ -708,6 +735,22 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
               </div>
               <div className="flex flex-col items-end gap-2">
                 <Badge status={reader.trainingStatus} />
+                <button
+                  onClick={() => toggleDiscipline(reader)}
+                  title={
+                    reader.disciplineValidated
+                      ? 'Validé(e) par le responsable discipline — cliquer pour retirer la validation'
+                      : 'En attente de validation du responsable discipline (obligatoire pour être classé)'
+                  }
+                  className={`flex items-center gap-1.5 self-end rounded-lg border px-2 py-1 text-[9px] font-black uppercase tracking-wider transition-colors ${
+                    reader.disciplineValidated
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
+                  }`}
+                >
+                  <ShieldCheck size={11} />
+                  {reader.disciplineValidated ? 'Discipline OK' : 'Discipline à valider'}
+                </button>
                   <div className="flex gap-1">
                     <button 
                       onClick={() => editReader(reader)}
@@ -796,12 +839,10 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
   );
 };
 
-const ROLES = [
-  { id: 'commentator', label: 'Le Commentateur', short: 'Com.' },
-  { id: 'reading1', label: 'Première Lecture', short: '1è Lect.' },
-  { id: 'reading2', label: 'Deuxième Lecture', short: '2è Lect.' },
-  { id: 'universal_prayer', label: 'Prière Universelle', short: 'Int.' }
-];
+// Les postes (ROLES) sont définis par le moteur de classement :
+// src/lib/ranking.ts — source unique partagée avec le planning.
+
+
 
 const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[], readers: Reader[], meetings: Meeting[], parishId: string }) => {
   const { currentParish } = useContext(ParishContext);
@@ -904,37 +945,109 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     }
   };
 
-  const checkEligibility = (reader: Reader, massId: string) => {
-    const training = reader.trainingStatus === 'completed';
-    
-    // Rule: Must have been present at the last general meeting
-    const pastMeetings = meetings.filter(m => m.date < new Date().toISOString()).sort((a, b) => b.date.localeCompare(a.date));
-    const lastMeeting = pastMeetings[0];
-    
-    const attendedLastMeeting = lastMeeting ? (attendanceRecords || []).some(a => 
-      a.massId === lastMeeting.id && 
-      a.readerId === reader.id && 
-      (a.status === 'present' || a.status === 'late')
-    ) : true; // If no past meetings, we consider this condition met
+  // --- Classement : éligibilité, proposition, préparation ---
+  const eligibilityByReader: Record<string, ReaderEligibility> = useMemo(() => {
+    if (!selectedMass) return {};
+    const map: Record<string, ReaderEligibility> = {};
+    evaluateEligibility(selectedMass, readers, attendanceRecords, meetings).forEach((e) => {
+      map[e.reader.id] = e;
+    });
+    return map;
+  }, [selectedMass, readers, attendanceRecords, meetings]);
 
-    const reasons = [];
-    if (!training) reasons.push("Formation non validée");
-    if (!attendedLastMeeting) reasons.push("Absence à la dernière réunion générale");
-
-    const isAvailable = training && attendedLastMeeting;
-
-    return {
-      eligible: isAvailable,
-      reasons,
-      training,
-      meeting: attendedLastMeeting
+  const checkEligibility = (reader: Reader, _massId?: string): ReaderEligibility =>
+    eligibilityByReader[reader.id] || {
+      reader,
+      eligible: false,
+      trainingOk: false,
+      activeOk: false,
+      disciplineOk: false,
+      meetingsRequired: 0,
+      meetingsAttended: 0,
+      meetingsOk: false,
+      reasons: ['Messe non sélectionnée'],
     };
+
+  /** Proposition (ou re-proposition) automatique du classement de la masse. */
+  const proposeForMass = async (mass: Mass) => {
+    const eligibility = evaluateEligibility(mass, readers, attendanceRecords, meetings);
+    const proposal = proposeRanking(mass, eligibility, Object.values(plannings), masses);
+
+    if (proposal.assignments.length === 0) {
+      toast.error('Aucun lecteur valide : formation, réunions et discipline doivent être validés.');
+      return;
+    }
+
+    const existing = plannings[mass.id];
+    try {
+      if (existing) {
+        await updateDoc(doc(db, 'plannings', existing.id), {
+          assignments: carryOverPreparation(proposal.assignments, existing.assignments || []),
+        });
+      } else {
+        await addDoc(collection(db, 'plannings'), {
+          parishId,
+          massId: mass.id,
+          assignments: proposal.assignments,
+          isFinalized: false,
+          proposedAt: new Date().toISOString(),
+          proposedBy: 'auto',
+        });
+      }
+      toast.success(
+        `Classement proposé : ${proposal.assignments.length} poste(s) rempli(s), ${proposal.queued.length} lecteur(s) valides à prévoir aux prochaines messes.`,
+      );
+    } catch (e) {
+      toast.error("Impossible d'enregistrer le classement.");
+      handleFirestoreError(e, OperationType.CREATE, 'plannings');
+    }
+  };
+
+  /** Coche répétition / confession / préparation spirituelle, puis confirmation du samedi. */
+  const updatePreparation = async (
+    massId: string,
+    readerId: string,
+    patch: Partial<NonNullable<ReaderAssignment['preparation']>>,
+  ) => {
+    const p = plannings[massId];
+    if (!p) return;
+
+    const next = (p.assignments || []).map((assignment) => {
+      if (assignment.readerId !== readerId) return assignment;
+      const preparation: NonNullable<ReaderAssignment['preparation']> = {
+        ...emptyPreparation(),
+        ...(assignment.preparation || {}),
+        ...patch,
+      };
+      // Décocher une étape retire automatiquement la confirmation du samedi.
+      if (patch.rehearsal === false || patch.confession === false || patch.spiritual === false) {
+        preparation.confirmed = false;
+        preparation.confirmedAt = undefined;
+      }
+      if (patch.confirmed) preparation.confirmedAt = new Date().toISOString();
+      return { ...assignment, preparation };
+    });
+
+    try {
+      await updateDoc(doc(db, 'plannings', p.id), { assignments: next });
+    } catch (e) {
+      toast.error('Mise à jour de la préparation impossible.');
+      handleFirestoreError(e, OperationType.UPDATE, `plannings/${p.id}`);
+    }
   };
 
   if (selectedMass) {
     const currentPlanning = plannings[selectedMass.id];
     const currentAssignments = currentPlanning?.assignments || [];
     const isFinalized = currentPlanning?.isFinalized || false;
+    // Lecteurs valides sans place pour cette messe : jamais oubliés, proposés
+    // automatiquement au classement des prochaines messes.
+    const requiredMeetings = requiredMeetingsFor(selectedMass, meetings);
+    const eligibleList: ReaderEligibility[] = Object.values(eligibilityByReader);
+    const queuedForNextMasses = eligibleList
+      .filter((e) => e.eligible && !currentAssignments.some((a) => a.readerId === e.reader.id))
+      .sort((a, b) => a.reader.name.localeCompare(b.reader.name, 'fr'));
+
 
     return (
       <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -988,7 +1101,62 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
           )}
         </div>
 
+        {/* Conditions de classement de cette messe */}
+        <Card className="border-accent/20 bg-accent/5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">
+                Classement du {format(rankingDateOf(selectedMass), 'EEEE d MMMM yyyy', { locale: fr })} — une semaine avant la messe
+              </p>
+              <p className="max-w-2xl text-xs leading-relaxed text-slate-400">
+                Seuls les lecteurs remplissant <b className="text-slate-300">les 3 conditions</b> sont proposés :
+                formation terminée et validée, présence aux dernières réunions exigées, validation du responsable discipline.
+              </p>
+            </div>
+            <Button
+              variant="accent"
+              onClick={() => proposeForMass(selectedMass)}
+              disabled={isFinalized}
+              className="shrink-0 text-xs"
+            >
+              <RefreshCw size={14} /> {currentPlanning ? 'Re-proposer le classement' : 'Proposer le classement'}
+            </Button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-accent/20 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl bg-background/60 p-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Formation</p>
+              <p className="mt-1 text-sm font-bold text-white">
+                {eligibleList.filter((e) => e.trainingOk).length} / {readers.length} validés
+              </p>
+            </div>
+            <div className="rounded-xl bg-background/60 p-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Discipline</p>
+              <p className="mt-1 text-sm font-bold text-white">
+                {Object.values(eligibilityByReader).filter((e) => e.disciplineOk).length} / {readers.length} validés
+              </p>
+            </div>
+            <div className="rounded-xl bg-background/60 p-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Réunions exigées</p>
+              <p className="mt-1 text-sm font-bold text-white">
+                {requiredMeetings.length === 0
+                  ? 'Aucune réunion enregistrée'
+                  : requiredMeetings
+                      .map((m) => format(parseISO(m.date), 'd MMM', { locale: fr }))
+                      .join(' · ')}
+              </p>
+            </div>
+            <div className="rounded-xl bg-background/60 p-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-accent">Lecteurs valides</p>
+              <p className="mt-1 text-sm font-bold text-white">
+                {Object.values(eligibilityByReader).filter((e) => e.eligible).length} / {readers.length}
+              </p>
+            </div>
+          </div>
+        </Card>
+
         {/* Roles Selection Area */}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {ROLES.map(role => {
             const assignment = currentAssignments.find(a => a.role === role.id);
@@ -1043,7 +1211,125 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
           })}
         </div>
 
+        {/* Lecteurs valides sans place → prochaines messes (personne n'est oublié) */}
+        {Object.values(eligibilityByReader).filter((e) => e.eligible).length > 0 && (
+          <Card className="border-slate-800/70 bg-slate-900/40">
+            <SectionTitle
+              icon={CalendarDays}
+              action={
+                <span className="rounded-full bg-accent/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-accent">
+                  {queuedForNextMasses.length} en attente
+                </span>
+              }
+            >
+              Valides non classés → prochaines messes
+            </SectionTitle>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+              Les lecteurs valides qui n'ont pas de place libre ne sont jamais écartés : ils sont repris
+              automatiquement au prochain classement, selon le même ordre de rotation.
+            </p>
+            {queuedForNextMasses.length === 0 ? (
+              <p className="mt-3 rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs italic text-slate-600">
+                Tous les lecteurs valides ont trouvé une place pour cette messe.
+              </p>
+            ) : (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {queuedForNextMasses.map((e, index) => (
+                  <span
+                    key={e.reader.id}
+                    className="flex items-center gap-2 rounded-xl border border-slate-800 bg-background/60 px-3 py-2 text-xs font-semibold text-slate-300"
+                  >
+                    <span className="font-mono text-[10px] font-black text-accent">#{index + 1}</span>
+                    {e.reader.prenom} {e.reader.name.toUpperCase()} {e.reader.postnom}
+                  </span>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Préparation liturgique : répétition, confession, préparation spirituelle, confirmation du samedi */}
+        {currentAssignments.length > 0 && (
+          <Card className="border-slate-800/70 bg-slate-900/40">
+            <SectionTitle icon={BookOpen}>Préparation des lecteurs retenus</SectionTitle>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+              Chaque lecteur classé suit : une répétition de sa prestation, la confession et la préparation
+              spirituelle. <b className="text-slate-400">Seuls les confirmés le samedi</b> (dernière réunion
+              de préparation) sont définitifs.
+            </p>
+            <div className="mt-4 space-y-3">
+              {currentAssignments.map((assignment) => {
+                const assigned = readers.find((r) => r.id === assignment.readerId);
+                if (!assigned) return null;
+                const prep = { ...emptyPreparation(), ...(assignment.preparation || {}) };
+                const allDone = !!(prep.rehearsal && prep.confession && prep.spiritual);
+                const steps: { key: 'rehearsal' | 'confession' | 'spiritual'; label: string }[] = [
+                  { key: 'rehearsal', label: 'Répétition' },
+                  { key: 'confession', label: 'Confession' },
+                  { key: 'spiritual', label: 'Prépa. spirituelle' },
+                ];
+                return (
+                  <div
+                    key={assignment.readerId}
+                    className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-background/50 p-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-white">
+                        {assigned.prenom} {assigned.name.toUpperCase()} {assigned.postnom}
+                      </p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
+                        {ROLES.find((r) => r.id === assignment.role)?.label || assignment.role}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {steps.map((step) => {
+                        const done = !!prep[step.key];
+                        return (
+                          <button
+                            key={step.key}
+                            disabled={isFinalized}
+                            onClick={() => updatePreparation(selectedMass.id, assignment.readerId, { [step.key]: !done })}
+                            className={`rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors disabled:opacity-60 ${
+                              done
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                                : 'border-slate-800 bg-slate-900 text-slate-500 hover:border-slate-700'
+                            }`}
+                          >
+                            {done ? '✓ ' : ''}
+                            {step.label}
+                          </button>
+                        );
+                      })}
+
+                      {prep.confirmed ? (
+                        <span className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                          <CheckCircle size={12} /> Confirmé (samedi)
+                        </span>
+                      ) : (
+                        <button
+                          disabled={isFinalized || !allDone}
+                          onClick={() => updatePreparation(selectedMass.id, assignment.readerId, { confirmed: true })}
+                          title={
+                            allDone
+                              ? 'Confirmer ce lecteur à la réunion de préparation du samedi'
+                              : 'Répétition, confession et préparation spirituelle à faire avant la confirmation'
+                          }
+                          className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-midnight transition-colors hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+                        >
+                          Confirmer (samedi)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
         {/* Reader Selection for active role */}
+
         {selectedRoleId && !isFinalized && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -1529,7 +1815,7 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
     { id: 'rythme', name: 'Rythme', description: 'Rythme de lecture' },
     { id: 'gestes', name: 'Gestes/attitudes liturgiques', description: 'Postures' },
     { id: 'voix', name: 'Voix', description: 'Travail de la voix' },
-    { id: 'intonation', name: 'Intonation', description: 'Travail de l\'intonation' },
+    { id: 'intonation', name: 'Intonation', description: "Travail de l'intonation" },
   ];
 
   const toggleModule = async (reader: Reader, moduleId: string) => {
@@ -1538,54 +1824,167 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
       const newModules = completedModules.includes(moduleId)
         ? completedModules.filter(id => id !== moduleId)
         : [...completedModules, moduleId];
-      
-      const newStatus: TrainingStatus = newModules.length === MODULES.length 
-        ? 'completed' 
+
+      const newStatus: TrainingStatus = newModules.length === MODULES.length
+        ? 'completed'
         : newModules.length > 0 ? 'in_progress' : 'none';
 
-      await updateDoc(doc(db, 'readers', reader.id), { 
+      await updateDoc(doc(db, 'readers', reader.id), {
         completedModules: newModules,
         trainingStatus: newStatus
       });
-      toast.success("Statut mis à jour");
+      toast.success(
+        newStatus === 'completed'
+          ? 'Formation validée : ce lecteur redevient éligible au classement.'
+          : 'Statut mis à jour',
+      );
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `readers/${reader.id}`);
     }
   };
 
+  /** Envoyer (ou renvoyer) un lecteur en formation à la suite de lacunes. */
+  const sendToTraining = async (reader: Reader, resend: boolean) => {
+    if (resend && !(await confirmAsync(
+      `Renvoyer ${reader.prenom} ${reader.name} en formation pour lacunes ? Il ne sera plus classé tant que la formation n'est pas revalidée.`,
+      'Renvoyer en formation',
+    ))) return;
+    try {
+      await updateDoc(doc(db, 'readers', reader.id), {
+        trainingStatus: 'in_progress',
+        sentToTrainingAt: new Date().toISOString(),
+      });
+      toast.success(resend ? `${reader.prenom} renvoyé(e) en formation` : `${reader.prenom} envoyé(e) en formation`);
+    } catch (e) {
+      toast.error('Action impossible.');
+      handleFirestoreError(e, OperationType.UPDATE, `readers/${reader.id}`);
+    }
+  };
+
+  const toTrain = readers.filter(r => r.trainingStatus !== 'completed');
+  const trained = readers.filter(r => r.trainingStatus === 'completed');
+  const notStarted = toTrain.filter(r => r.trainingStatus === 'none').length;
+  const inProgress = toTrain.filter(r => r.trainingStatus === 'in_progress').length;
+
+  const readerCard = (reader: Reader) => {
+    const isTrained = reader.trainingStatus === 'completed';
+    return (
+      <div
+        key={reader.id}
+        className={`flex flex-col rounded-2xl border p-4 ${
+          isTrained ? 'border-slate-800/60 bg-card' : 'border-amber-500/25 bg-amber-500/5'
+        }`}
+      >
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-white">
+              {reader.prenom} {reader.name.toUpperCase()} {reader.postnom}
+            </p>
+            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-600">
+              {(reader.completedModules || []).length}/{MODULES.length} modules
+              {reader.sentToTrainingAt
+                ? ` · envoyé le ${format(parseISO(reader.sentToTrainingAt), 'd/MM/yy', { locale: fr })}`
+                : ''}
+            </p>
+          </div>
+          <Badge status={reader.trainingStatus || 'none'} />
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {MODULES.map(module => (
+            <button
+              key={module.id}
+              onClick={() => toggleModule(reader, module.id)}
+              className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                (reader.completedModules || []).includes(module.id)
+                  ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400'
+                  : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              {module.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        {isTrained ? (
+          <Button
+            variant="secondary"
+            className="mt-4 w-full py-2 text-[10px]"
+            onClick={() => sendToTraining(reader, true)}
+          >
+            <AlertCircle size={13} /> Renvoyer en formation (lacunes)
+          </Button>
+        ) : (
+          <Button
+            variant="accent"
+            className="mt-4 w-full py-2 text-[10px]"
+            disabled={reader.trainingStatus === 'in_progress'}
+            onClick={() => sendToTraining(reader, false)}
+          >
+            {reader.trainingStatus === 'in_progress' ? 'Formation en cours…' : 'Envoyer en formation'}
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
         title="Formation"
-        description="Suivez en temps réel la progression de chaque lecteur."
+        description="À former en premier, puis formation validée. Un lecteur peut être (re)envoyé en formation à chaque lacune constatée — il n'est plus classé tant que la formation n'est pas revalidée."
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {readers.map(reader => (
-          <div key={reader.id} className="bg-card p-4 rounded-3xl border border-slate-800">
-            <p className="text-white font-bold mb-2">{reader.prenom} {reader.name}</p>
-            <div className="flex gap-2 flex-wrap">
-              {MODULES.map(module => (
-                <button 
-                  key={module.id}
-                  onClick={() => toggleModule(reader, module.id)}
-                  className={`px-3 py-1 rounded-full text-xs font-bold ${
-                    (reader.completedModules || []).includes(module.id) 
-                      ? 'bg-green-500/20 text-green-400 border border-green-500/20' 
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  {module.name}
-                </button>
-              ))}
-            </div>
+      <section className="space-y-4">
+        <SectionTitle
+          icon={AlertCircle}
+          action={
+            <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-amber-500">
+              {toTrain.length} lecteur(s) à former
+            </span>
+          }
+        >
+          Pas encore formés{notStarted > 0 ? ` — ${notStarted} à démarrer` : ''}{inProgress > 0 ? ` · ${inProgress} en cours` : ''}
+        </SectionTitle>
+
+        {toTrain.length === 0 ? (
+          <EmptyState
+            icon={CheckCircle}
+            title="Tous les lecteurs ont une formation validée"
+            description="Ils restent soumis aux réunions exigées et à la validation de la discipline."
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {toTrain.map((reader) => readerCard(reader))}
           </div>
-        ))}
-      </div>
+        )}
+      </section>
+
+      <section className="space-y-4 border-t border-slate-800 pt-8">
+        <SectionTitle
+          icon={BookOpen}
+          action={
+            <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-400">
+              {trained.length} formé(s)
+            </span>
+          }
+        >
+          Formation validée
+        </SectionTitle>
+
+        {trained.length === 0 ? (
+          <EmptyState icon={BookOpen} title="Aucune formation validée pour l'instant" />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {trained.map((reader) => readerCard(reader))}
+          </div>
+        )}
+      </section>
     </div>
   );
 };
-
 const TreasuryView = ({ readers, parishId }: { readers: Reader[], parishId: string }) => {
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [month, setMonth] = useState(new Date().getMonth() + 1);
@@ -2761,8 +3160,25 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
         intentionsFileType: intentionsFile?.type || null
       };
       console.log("Attempting to add mass with data:", massData);
-      await addDoc(collection(db, 'masses'), massData);
+      const created = await addDoc(collection(db, 'masses'), massData);
       toast.success("Évènement créé");
+
+      // Classement automatique : proposé dès la création de la messe.
+      try {
+        const summary = await autoProposePlanning(parishId, { ...(massData as unknown as Mass), id: created.id });
+        const meetingLabel = summary.requiredMeetings.length
+          ? ` Réunions exigées : ${summary.requiredMeetings
+              .map((m) => format(parseISO(m.date), 'd MMM', { locale: fr }))
+              .join(' et ')}.`
+          : '';
+        toast.info(
+          `Classement automatique : ${summary.assigned} poste(s) rempli(s), ${summary.queued} lecteur(s) valides à prévoir aux prochaines messes.${meetingLabel}`,
+          { duration: 10000 },
+        );
+      } catch (error) {
+        console.error(error);
+        toast.warning("Messe créée, mais le classement automatique n'a pas pu être proposé. Ouvrez Planning pour le lancer.");
+      }
       setShowAdd(false);
       setTitle('');
       setDate('');
@@ -3391,6 +3807,61 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
   const [expandedMassReaders, setExpandedMassReaders] = useState<Record<string, boolean>>({});
   const [showAllWeeks, setShowAllWeeks] = useState(false);
   const [excuseModal, setExcuseModal] = useState<{isOpen: boolean, date: string}>({isOpen: false, date: ''});
+  const [regName, setRegName] = useState('');
+  const [regPostnom, setRegPostnom] = useState('');
+  const [regPrenom, setRegPrenom] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regLoading, setRegLoading] = useState(false);
+
+  /** Inscription directe sur cette paroisse : aucun code administrateur. */
+  const submitRegistration = async () => {
+    if (!regName.trim() || !regPostnom.trim() || !regPrenom.trim()) {
+      toast.error('Nom, post-nom et prénom sont obligatoires.');
+      return;
+    }
+    const fullName = `${regPrenom.trim()} ${regName.trim()} ${regPostnom.trim()}`.toLowerCase();
+    const already = readers.find(
+      (r) =>
+        `${r.prenom || ''} ${r.name || ''} ${r.postnom || ''}`.trim().toLowerCase() === fullName,
+    );
+    if (already) {
+      toast.info('Vous êtes déjà inscrit(e) dans cette paroisse.');
+      return;
+    }
+
+    setRegLoading(true);
+    try {
+      await addDoc(collection(db, 'readers'), {
+        parishId: parish.id,
+        name: regName.trim(),
+        postnom: regPostnom.trim(),
+        prenom: regPrenom.trim(),
+        birthDay: null,
+        birthMonth: null,
+        address: null,
+        phone: regPhone.trim() || null,
+        email: null,
+        photoURL: null,
+        completedModules: [],
+        trainingStatus: 'none',
+        isActive: true,
+        roles: [],
+        registeredVia: 'public',
+        createdAt: new Date().toISOString(),
+      });
+      toast.success('Inscription envoyée ! La paroisse vous contactera pour la formation.');
+      setRegName('');
+      setRegPostnom('');
+      setRegPrenom('');
+      setRegPhone('');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Inscription impossible : ${e.message || 'erreur réseau'}`);
+    } finally {
+      setRegLoading(false);
+    }
+  };
+
 
   const toggleExpanded = (massId: string) => {
     setExpandedMassReaders(prev => ({
@@ -3484,6 +3955,43 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             </div>
           </div>
         </header>
+
+        {/* Inscription publique : sans code paroisse */}
+        <Card className="border-accent/20 bg-accent/5">
+          <SectionTitle icon={UserPlus}>S'inscrire comme lecteur / lectrice</SectionTitle>
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-slate-400">
+            Inscription <b className="text-slate-300">directement sur cette paroisse</b>, sans code
+            administrateur : la paroisse étudie votre demande puis la formation commence. Pour être
+            classé(e) aux messes, il faudra ensuite la formation validée, la présence aux réunions
+            exigées et la validation du responsable discipline.
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <Field label="Nom">
+              <Input value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="Nom" autoComplete="family-name" />
+            </Field>
+            <Field label="Post-nom">
+              <Input value={regPostnom} onChange={(e) => setRegPostnom(e.target.value)} placeholder="Post-nom" />
+            </Field>
+            <Field label="Prénom">
+              <Input value={regPrenom} onChange={(e) => setRegPrenom(e.target.value)} placeholder="Prénom" autoComplete="given-name" />
+            </Field>
+            <Field label="Téléphone">
+              <Input value={regPhone} onChange={(e) => setRegPhone(e.target.value)} placeholder="+243 8..." inputMode="tel" />
+            </Field>
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <Button
+              variant="accent"
+              loading={regLoading}
+              disabled={!regName.trim() || !regPostnom.trim() || !regPrenom.trim()}
+              onClick={submitRegistration}
+            >
+              <UserPlus size={16} /> Envoyer mon inscription
+            </Button>
+          </div>
+        </Card>
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
