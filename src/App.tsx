@@ -3540,6 +3540,7 @@ const LandingView = ({
             <div className="flex items-center gap-3">
               <Logo className="w-12 h-12" />
             </div>
+            <InstallPWA />
           </nav>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
@@ -3936,6 +3937,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             <span className="font-bold uppercase tracking-widest text-xs">Retour</span>
           </button>
           <div className="text-right flex items-center gap-6">
+            <InstallPWA />
             <Button 
               onClick={() => onAdminRequest(parish)} 
               variant="outline" 
