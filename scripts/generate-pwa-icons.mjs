@@ -116,10 +116,11 @@ const renderIcon = (size, { maskable = false } = {}) => {
       pixel = over(pixel, AMBER, ring);
     }
 
-    // the cross
-    const d1 = sdSegment(px, py, cx, cy - arm, cx, cy + arm);
-    const d2 = sdSegment(px, py, cx - arm, cy, cx + arm, cy);
-    const cross = 1 - smoothstep(thick - 0.6, thick + 0.6, Math.min(d1, d2));
+    // Latin cross: longer vertical bar, crossbar in the upper third
+    const vertical = sdSegment(px, py, cx, cy - arm * 1.3, cx, cy + arm * 1.3);
+    const barY = cy - arm * 0.45;
+    const horizontal = sdSegment(px, py, cx - arm * 0.85, barY, cx + arm * 0.85, barY);
+    const cross = 1 - smoothstep(thick - 0.6, thick + 0.6, Math.min(vertical, horizontal));
     pixel = over(pixel, AMBER, cross);
 
     return pixel;
