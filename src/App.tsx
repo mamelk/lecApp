@@ -112,6 +112,7 @@ import { OperationType } from './types';
 import { generateReaderStatsPDF, generateGlobalStatsPDF, generatePlanningPDF, generateReaderListPDF } from './lib/reports';
 import { ExcuseModal } from './components/ExcuseModal';
 import { ExcusesView } from './components/ExcusesView';
+import { InstallPWA } from './components/InstallPWA';
 import { Button, Card, Badge, PageHeader, SectionTitle, StatCard, Field, Input, Select, EmptyState, Modal, inputClass } from './components/ui';
 import { NAV_GROUPS, NAV_ITEMS, getNavItem, MOBILE_PRIMARY, NavId } from './navigation';
 import { ROLES, evaluateEligibility, proposeRanking, requiredMeetingsFor, carryOverPreparation, rankingDateOf, emptyPreparation, autoProposePlanning, ReaderEligibility } from './lib/ranking';
@@ -5447,6 +5448,7 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              <InstallPWA />
               {pendingRequestsCount > 0 && (
                 <button
                   onClick={() => {
