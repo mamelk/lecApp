@@ -3912,7 +3912,10 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
     });
 
     return () => { unsubMasses(); unsubPlannings(); unsubReaders(); unsubFeedbacks(); };
-  }, [parish]);
+    // Dépendre de l'id uniquement : une nouvelle instance de l'objet parish
+    // (à chaque snapshot de la liste des paroisses) ne doit pas reconstruire
+    // les 4 abonnements — chaque réabonnement relit toute la collection.
+  }, [parish?.id]);
 
   const groupedMasses = useMemo(() => {
     const groups: Record<string, Mass[]> = {};
