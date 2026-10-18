@@ -4,6 +4,7 @@
   "description": "Gestion des lecteurs, messes, présences, planning et trésorerie de la paroisse.",
   "lang": "fr",
   "dir": "ltr",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

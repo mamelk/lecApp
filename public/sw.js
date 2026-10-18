@@ -3,10 +3,27 @@
    - build assets (hashed): cache first, they never change name
    - cross-origin requests (Firestore, Auth): ignored, handled by the SDK */
 
-const CACHE_NAME = 'lecapp-v1';
+const CACHE_NAME = 'lecapp-v2';
+
+// Assets the launcher needs to draw the app icon in the device's app list:
+// the manifest plus every icon, cached at install time so the logo resolves
+// even on the first offline launch after installation.
+const PRECACHE_ASSETS = [
+  '/',
+  '/manifest.webmanifest',
+  '/icons/icon-180.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-512-maskable.png',
+];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    caches
+      .open(CACHE_NAME)
+      .then((store) => store.addAll(PRECACHE_ASSETS))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (event) => {
