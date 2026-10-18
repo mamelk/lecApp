@@ -224,5 +224,19 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if false; // Managed via console
     }
+
+    // Jetons d'abonnement push (FCM Web Push) : chaque appareil écrit son
+    // propre jeton ; la collection n'est jamais lue côté client (la Cloud
+    // Function la lit avec les droits admin).
+    match /push_tokens/{tokenId} {
+      allow list, get: if false;
+      allow create: if incoming().keys().hasAll(['token', 'parishId', 'createdAt']) &&
+                     incoming().token is string && incoming().token.size() <= 4096 &&
+                     isValidId(incoming().parishId) &&
+                     (!incoming().keys().contains('uid') || incoming().uid == null || incoming().uid is string) &&
+                     (!incoming().keys().contains('platform') || incoming().platform is string);
+      allow update: if incoming().token == existing().token && incoming().parishId == existing().parishId;
+      allow delete: if true; // Chaque appareil peut se désabonner
+    }
   }
 }

@@ -4,6 +4,7 @@ import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
+export { app };
 
 // Cache local persistant (IndexedDB) partagé entre les onglets : les
 // réouvertures de l'app (notamment l'application installée sur téléphone)

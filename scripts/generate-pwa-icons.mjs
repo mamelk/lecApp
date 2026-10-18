@@ -147,6 +147,39 @@ const renderIcon = (size, { maskable = false } = {}) => {
   return encodePng(size, size, rgba);
 };
 
+/* ---------- ICO wrapper (PNG payload, supported since Vista) ---------- */
+
+const encodeIco = (png) => {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // type: icon
+  header.writeUInt16LE(1, 4); // one image
+  const entry = Buffer.alloc(16);
+  entry[0] = 32; // width
+  entry[1] = 32; // height
+  entry.writeUInt16LE(1, 4); // planes
+  entry.writeUInt16LE(32, 6); // bit count
+  entry.writeUInt32LE(png.length, 8);
+  entry.writeUInt32LE(22, 12); // offset = header(6) + entry(16)
+  return Buffer.concat([header, entry, png]);
+};
+
+/* ---------- SVG icon (vector fallback: never blurry, never blank) ---------- */
+
+const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0B1120"/>
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <rect x="28" y="28" width="456" height="456" rx="84" fill="none" stroke="#f59e0b" stroke-width="12"/>
+  <path d="M256 100V412 M154 202H358" fill="none" stroke="#f59e0b" stroke-width="51" stroke-linecap="round"/>
+</svg>
+`;
+
 /* ---------- Write files ---------- */
 
 const targets = [
@@ -161,3 +194,10 @@ for (const [name, buffer] of targets) {
   fs.writeFileSync(file, buffer);
   console.log(`${name}: ${buffer.length} octets`);
 }
+
+fs.writeFileSync(path.join(OUT_DIR, 'icon.svg'), svgIcon);
+console.log('icon.svg: écrit');
+
+const ico = encodeIco(renderIcon(32));
+fs.writeFileSync(path.join(path.resolve('public'), 'favicon.ico'), ico);
+console.log(`favicon.ico: ${ico.length} octets`);

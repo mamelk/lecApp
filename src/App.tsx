@@ -113,6 +113,8 @@ import { generateReaderStatsPDF, generateGlobalStatsPDF, generatePlanningPDF, ge
 import { ExcuseModal } from './components/ExcuseModal';
 import { ExcusesView } from './components/ExcusesView';
 import { InstallPWA } from './components/InstallPWA';
+import { NotificationsBell } from './components/NotificationsBell';
+import { markMassCreatedLocally, notifyNewMassesFromSnapshot } from './lib/notifications';
 import { Button, Card, Badge, PageHeader, SectionTitle, StatCard, Field, Input, Select, EmptyState, Modal, inputClass } from './components/ui';
 import { NAV_GROUPS, NAV_ITEMS, getNavItem, MOBILE_PRIMARY, NavId } from './navigation';
 import { ROLES, evaluateEligibility, proposeRanking, requiredMeetingsFor, carryOverPreparation, rankingDateOf, emptyPreparation, autoProposePlanning, ReaderEligibility } from './lib/ranking';
@@ -3162,6 +3164,7 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
       };
       console.log("Attempting to add mass with data:", massData);
       const created = await addDoc(collection(db, 'masses'), massData);
+      markMassCreatedLocally(created.id);
       toast.success("Évènement créé");
 
       // Classement automatique : proposé dès la création de la messe.
@@ -3540,7 +3543,10 @@ const LandingView = ({
             <div className="flex items-center gap-3">
               <Logo className="w-12 h-12" />
             </div>
-            <InstallPWA />
+            <div className="flex items-center gap-2">
+              <NotificationsBell parishId={null} />
+              <InstallPWA />
+            </div>
           </nav>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
@@ -3881,6 +3887,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
       snapshot.forEach(d => m.push({ ...d.data() as Mass, id: d.id }));
       setMasses(m);
       setLoading(false);
+      notifyNewMassesFromSnapshot(snapshot);
     }, (error) => {
       console.error("Error loading masses:", error);
       setLoading(false);
@@ -3940,6 +3947,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             <span className="font-bold uppercase tracking-widest text-xs">Retour</span>
           </button>
           <div className="text-right flex items-center gap-6">
+            <NotificationsBell parishId={parish?.id ?? null} />
             <InstallPWA />
             <Button 
               onClick={() => onAdminRequest(parish)} 
@@ -4647,6 +4655,7 @@ export default function App() {
       const m: Mass[] = [];
       snapshot.forEach(d => m.push({ ...d.data() as Mass, id: d.id }));
       setActiveMasses(m);
+      notifyNewMassesFromSnapshot(snapshot);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'masses');
     });
@@ -5453,6 +5462,7 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              <NotificationsBell parishId={currentParish?.id ?? null} />
               <InstallPWA />
               {pendingRequestsCount > 0 && (
                 <button
