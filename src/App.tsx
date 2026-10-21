@@ -3820,11 +3820,38 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
   const [regPrenom, setRegPrenom] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regLoading, setRegLoading] = useState(false);
+  const [regBirthDay, setRegBirthDay] = useState('');
+  const [regBirthMonth, setRegBirthMonth] = useState('');
+  const [regAddress, setRegAddress] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regRoles, setRegRoles] = useState<string[]>([]);
+  const [regPhoto, setRegPhoto] = useState<string | null>(null);
+  /** Onglets publics (avant connexion) : Messes · Excuses · S'inscrire */
+  const [publicTab, setPublicTab] = useState<'masses' | 'excuses' | 'register'>('masses');
+  const PUBLIC_TABS = [
+    { id: 'masses' as const, label: 'Messes', icon: CalendarDays },
+    { id: 'excuses' as const, label: 'Excuses', icon: FileText },
+    { id: 'register' as const, label: "S'inscrire", icon: UserPlus },
+  ];
+  const [showPastMasses, setShowPastMasses] = useState(false);
+  const [excuseTargetDate, setExcuseTargetDate] = useState('');
 
   /** Inscription directe sur cette paroisse : aucun code administrateur. */
   const submitRegistration = async () => {
     if (!regName.trim() || !regPostnom.trim() || !regPrenom.trim()) {
       toast.error('Nom, post-nom et prénom sont obligatoires.');
+      return;
+    }
+    if (regBirthDay && (parseInt(regBirthDay) < 1 || parseInt(regBirthDay) > 31)) {
+      toast.error('Le jour de naissance doit être compris entre 1 et 31.');
+      return;
+    }
+    if (regPhone.trim().length > 50 || regAddress.trim().length > 300 || regEmail.trim().length > 128) {
+      toast.error('Téléphone (50), adresse (300) ou email (128) trop long.');
+      return;
+    }
+    if (regEmail.trim() && !/^\S+@\S+\.\S+$/.test(regEmail.trim())) {
+      toast.error("L'adresse email n'est pas valide.");
       return;
     }
     const fullName = `${regPrenom.trim()} ${regName.trim()} ${regPostnom.trim()}`.toLowerCase();
@@ -3844,16 +3871,16 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
         name: regName.trim(),
         postnom: regPostnom.trim(),
         prenom: regPrenom.trim(),
-        birthDay: null,
-        birthMonth: null,
-        address: null,
+        birthDay: regBirthDay ? parseInt(regBirthDay) : null,
+        birthMonth: regBirthMonth ? parseInt(regBirthMonth) : null,
+        address: regAddress.trim() || null,
         phone: regPhone.trim() || null,
-        email: null,
-        photoURL: null,
+        email: regEmail.trim() || null,
+        photoURL: regPhoto || null,
         completedModules: [],
         trainingStatus: 'none',
         isActive: true,
-        roles: [],
+        roles: regRoles,
         registeredVia: 'public',
         createdAt: new Date().toISOString(),
       });
@@ -3862,6 +3889,12 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
       setRegPostnom('');
       setRegPrenom('');
       setRegPhone('');
+      setRegBirthDay('');
+      setRegBirthMonth('');
+      setRegAddress('');
+      setRegEmail('');
+      setRegRoles([]);
+      setRegPhoto(null);
     } catch (e: any) {
       console.error(e);
       toast.error(`Inscription impossible : ${e.message || 'erreur réseau'}`);
@@ -3870,6 +3903,40 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
     }
   };
 
+  /** Photo de profil compressée (même traitement que le formulaire admin). */
+  const handleRegPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Veuillez choisir une image.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 300;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > MAX) { height *= MAX / width; width = MAX; }
+        } else {
+          if (height > MAX) { width *= MAX / height; height = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          setRegPhoto(canvas.toDataURL('image/jpeg', 0.7));
+        }
+      };
+      if (typeof event.target?.result === 'string') img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const toggleExpanded = (massId: string) => {
     setExpandedMassReaders(prev => ({
@@ -3924,44 +3991,63 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
     // les 4 abonnements — chaque réabonnement relit toute la collection.
   }, [parish?.id]);
 
-  const groupedMasses = useMemo(() => {
+  const groupByWeek = (list: Mass[]) => {
     const groups: Record<string, Mass[]> = {};
-    masses.forEach(mass => {
-        const date = parseISO(mass.date);
-        const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 });
-        const weekKey = format(startOfWeekDate, 'yyyy-MM-dd');
-        if (!groups[weekKey]) groups[weekKey] = [];
-        groups[weekKey].push(mass);
+    list.forEach(mass => {
+      const date = parseISO(mass.date);
+      const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 });
+      const weekKey = format(startOfWeekDate, 'yyyy-MM-dd');
+      if (!groups[weekKey]) groups[weekKey] = [];
+      groups[weekKey].push(mass);
     });
-    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [masses]);
+    return Object.entries(groups);
+  };
+
+  /** Messes à venir (chronologique) et messes passées (plus récentes d'abord). */
+  const upcomingMasses = useMemo(
+    () => masses
+      .filter(m => parseISO(m.date).getTime() >= Date.now())
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    [masses],
+  );
+  const pastMasses = useMemo(
+    () => masses
+      .filter(m => parseISO(m.date).getTime() < Date.now())
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [masses],
+  );
+  const groupedMasses = useMemo(() => groupByWeek(upcomingMasses), [upcomingMasses]);
+  const groupedPastMasses = useMemo(() => groupByWeek(pastMasses), [pastMasses]);
+
+  /** Par défaut, l'excuse vise la prochaine messe à venir. */
+  useEffect(() => {
+    if (!excuseTargetDate && upcomingMasses.length > 0) {
+      setExcuseTargetDate(upcomingMasses[0].date);
+    }
+  }, [upcomingMasses, excuseTargetDate]);
+
+  /** Groupes affichés : la (ou les) prochaine(s) semaine(s) de messes, puis les messes passées si demandé. */
+  const visibleWeekGroups = showAllWeeks ? groupedMasses : groupedMasses.slice(0, 1);
+  const allVisibleGroups = showPastMasses ? [...visibleWeekGroups, ...groupedPastMasses] : visibleWeekGroups;
 
   return (
-    <div className="min-h-screen bg-background p-6 md:p-12 animate-in fade-in duration-500">
+    <div className="min-h-screen bg-background p-6 pb-28 md:p-12 animate-in fade-in duration-500">
       <div className="max-w-4xl mx-auto space-y-12">
-        <header className="flex justify-between items-center">
+        <header className="flex flex-wrap items-center justify-between gap-4">
           <button onClick={onBack} className="flex items-center gap-3 text-white group">
             <div className="w-10 h-10 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center group-hover:border-accent group-hover:text-accent transition-all">
               <ArrowLeft size={20} />
             </div>
             <span className="font-bold uppercase tracking-widest text-xs">Retour</span>
           </button>
-          <div className="text-right flex items-center gap-6">
+          <div className="text-right flex flex-wrap items-center justify-end gap-4 md:gap-6">
             <NotificationsBell parishId={parish?.id ?? null} />
             <InstallPWA />
-            <Button 
-              onClick={() => onAdminRequest(parish)} 
+            <Button              onClick={() => onAdminRequest(parish)} 
               variant="outline" 
               className="flex text-[10px] uppercase font-bold tracking-widest border-slate-800 hover:border-accent hover:text-accent"
             >
               Gérer la Paroisse
-            </Button>
-            <Button
-              onClick={() => setExcuseModal({isOpen: true, date: new Date().toISOString()})}
-              variant="outline"
-              className="flex text-[10px] uppercase font-bold tracking-widest border-slate-800 hover:border-accent hover:text-accent"
-            >
-              S'excuser
             </Button>
             <div>
                <h1 className="text-2xl font-black text-white italic uppercase tracking-tighter">{parish.name}</h1>
@@ -3970,7 +4056,47 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
           </div>
         </header>
 
+        {/* Navigation publique (avant connexion) : Messes · Excuses · S'inscrire */}
+        {/* Grands écrans : onglets en haut, sous le titre */}
+        <nav className="hidden md:flex flex-wrap gap-2 border-b border-slate-800 pb-4" aria-label="Espace public de la paroisse">
+          {PUBLIC_TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setPublicTab(id)}
+              aria-current={publicTab === id ? 'page' : undefined}
+              className={`flex items-center gap-2 px-5 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all ${
+                publicTab === id
+                  ? 'bg-accent text-midnight border-accent shadow-lg shadow-amber-500/10'
+                  : 'bg-slate-900/40 text-slate-400 border-slate-800 hover:text-white hover:border-slate-700'
+              }`}
+            >
+              <Icon size={14} /> {label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Petits écrans : onglets fixés en bas de l'écran (barre mobile) */}
+        <nav className="fixed inset-x-0 bottom-0 z-40 flex m-0! border-t border-slate-800 bg-primary/95 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Espace public de la paroisse">
+          {PUBLIC_TABS.map(({ id, label, icon: Icon }) => {
+            const active = publicTab === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setPublicTab(id)}
+                aria-current={active ? 'page' : undefined}
+                className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                  active ? 'text-accent' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <Icon size={18} />
+                <span className="w-full truncate px-1">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
         {/* Inscription publique : sans code paroisse */}
+        {publicTab === 'register' && (
         <Card className="border-accent/20 bg-accent/5">
           <SectionTitle icon={UserPlus}>S'inscrire comme lecteur / lectrice</SectionTitle>
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-slate-400">
@@ -3980,19 +4106,87 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             exigées et la validation du responsable discipline.
           </p>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          {/* Photo de profil (optionnelle) */}
+          <div className="mt-4 flex items-center gap-4">
+            <label className="group relative cursor-pointer">
+              <input type="file" accept="image/*" className="sr-only" onChange={handleRegPhoto} />
+              <div className="w-20 h-20 rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 overflow-hidden flex items-center justify-center group-hover:border-accent transition-all">
+                {regPhoto ? (
+                  <img src={regPhoto} alt="Photo de profil" className="w-full h-full object-cover" />
+                ) : (
+                  <UserPlus size={20} className="text-slate-600" />
+                )}
+              </div>
+            </label>
+            {regPhoto && (
+              <button
+                onClick={() => setRegPhoto(null)}
+                className="text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:text-red-500"
+              >
+                Retirer la photo
+              </button>
+            )}
+            <p className="text-[9px] text-slate-500 uppercase tracking-widest">Photo de profil (optionnelle)</p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Prénom">
+              <Input value={regPrenom} onChange={(e) => setRegPrenom(e.target.value.replace(/[0-9]/g, ''))} placeholder="Prénom" autoComplete="given-name" />
+            </Field>
             <Field label="Nom">
-              <Input value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="Nom" autoComplete="family-name" />
+              <Input value={regName} onChange={(e) => setRegName(e.target.value.replace(/[0-9]/g, ''))} placeholder="Nom" autoComplete="family-name" />
             </Field>
             <Field label="Post-nom">
-              <Input value={regPostnom} onChange={(e) => setRegPostnom(e.target.value)} placeholder="Post-nom" />
+              <Input value={regPostnom} onChange={(e) => setRegPostnom(e.target.value.replace(/[0-9]/g, ''))} placeholder="Post-nom" />
             </Field>
-            <Field label="Prénom">
-              <Input value={regPrenom} onChange={(e) => setRegPrenom(e.target.value)} placeholder="Prénom" autoComplete="given-name" />
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Jour de naissance">
+              <Input type="number" inputMode="numeric" min={1} max={31} value={regBirthDay} onChange={(e) => setRegBirthDay(e.target.value)} placeholder="JJ" />
+            </Field>
+            <Field label="Mois de naissance">
+              <Select value={regBirthMonth} onChange={(e) => setRegBirthMonth(e.target.value)}>
+                <option value="">Mois</option>
+                {['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'].map((m, i) => (
+                  <option key={m} value={i + 1}>{m}</option>
+                ))}
+              </Select>
             </Field>
             <Field label="Téléphone">
-              <Input value={regPhone} onChange={(e) => setRegPhone(e.target.value)} placeholder="+243 8..." inputMode="tel" />
+              <Input type="tel" inputMode="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value.replace(/[^0-9+]/g, ''))} placeholder="+243 8..." autoComplete="tel" />
             </Field>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Adresse">
+              <Input value={regAddress} onChange={(e) => setRegAddress(e.target.value)} placeholder="Adresse physique" />
+            </Field>
+            <Field label="Email (optionnel)">
+              <Input type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="email@exemple.com" autoComplete="email" />
+            </Field>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Rôles capables (facultatif)</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {ROLES.map(role => (
+                <button
+                  key={role.id}
+                  type="button"
+                  onClick={() => {
+                    setRegRoles((prev) => prev.includes(role.id) ? prev.filter(r => r !== role.id) : [...prev, role.id]);
+                  }}
+                  className={`p-3 rounded-xl border text-[10px] font-bold transition-all ${
+                    regRoles.includes(role.id)
+                      ? 'bg-accent/20 border-accent text-accent'
+                      : 'bg-slate-800/50 border-slate-700 text-slate-500'
+                  }`}
+                >
+                  {role.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mt-4 flex justify-end">
@@ -4006,15 +4200,52 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
             </Button>
           </div>
         </Card>
+        )}
 
-        {loading ? (
+        {/* Onglet Excuses : présentation d'une excuse avant connexion */}
+        {publicTab === 'excuses' && (
+          <Card className="border-accent/20 bg-accent/5">
+            <SectionTitle icon={FileText}>Présenter mes excuses</SectionTitle>
+            <p className="mt-2 max-w-3xl text-xs leading-relaxed text-slate-400">
+              Vous ne pouvez pas assister à une célébration ? Présentez vos excuses à
+              l'administration de la paroisse <b className="text-slate-300">avant même de vous
+              connecter</b> : choisissez la messe concernée puis indiquez votre nom et votre motif.
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Célébration concernée">
+                <Select value={excuseTargetDate} onChange={(e) => setExcuseTargetDate(e.target.value)}>
+                  {upcomingMasses.length === 0 ? (
+                    <option value="">Aucune messe à venir programmée</option>
+                  ) : (
+                    upcomingMasses.map(m => (
+                      <option key={m.id} value={m.date}>
+                        {`${m.title} — ${format(parseISO(m.date), 'EEEE d MMMM · HH:mm', { locale: fr })}`}
+                      </option>
+                    ))
+                  )}
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                <Button
+                  variant="accent"
+                  onClick={() => setExcuseModal({ isOpen: true, date: excuseTargetDate || new Date().toISOString() })}
+                >
+                  Présenter mes excuses
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Onglet Messes : prochaines célébrations (avant connexion) */}
+        {publicTab === 'masses' && (loading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <Logo className="w-16 h-16" showText={false} />
             <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Chargement du planning...</p>
           </div>
         ) : (
           <div className="space-y-8 pb-32">
-            {(showAllWeeks ? groupedMasses : groupedMasses.slice(0, 1)).map(([weekKey, weekMasses]) => (
+            {allVisibleGroups.map(([weekKey, weekMasses]) => (
               <div key={weekKey} className="space-y-4">
                 <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-8">Semaine du {format(parseISO(weekKey), 'd MMMM yyyy', { locale: fr })}</h4>
                 <hr className="border-slate-800" />
@@ -4152,14 +4383,25 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
                 </Button>
               </div>
             )}
-            {masses.length === 0 && (
+            {!loading && groupedMasses.length === 0 && (
               <div className="col-span-full py-24 text-center bg-slate-900/10 rounded-[64px] border border-dashed border-slate-800">
                   <CalendarDays size={48} className="mx-auto text-slate-800 mb-6" />
-                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Aucune célébration prévue pour le moment</p>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Aucune célébration à venir pour le moment</p>
+              </div>
+            )}
+            {pastMasses.length > 0 && (
+              <div className="flex justify-center pt-8">
+                <Button
+                  onClick={() => setShowPastMasses(!showPastMasses)}
+                  variant="ghost"
+                  className="text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:text-accent"
+                >
+                  {showPastMasses ? 'Masquer les messes passées' : `Voir les messes passées (${pastMasses.length})`}
+                </Button>
               </div>
             )}
           </div>
-        )}
+        ))}
       </div>
       <ExcuseModal 
         isOpen={excuseModal.isOpen} 
