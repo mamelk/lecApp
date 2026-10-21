@@ -89,7 +89,7 @@ import {
   getDocs,
   writeBatch
 } from 'firebase/firestore';
-import { format, isSameDay, parseISO, parse, startOfWeek } from 'date-fns';
+import { endOfWeek, format, isSameDay, parseISO, parse, startOfWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { 
   Parish, 
@@ -4016,8 +4016,28 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
       .sort((a, b) => b.date.localeCompare(a.date)),
     [masses],
   );
-  const groupedMasses = useMemo(() => groupByWeek(upcomingMasses), [upcomingMasses]);
-  const groupedPastMasses = useMemo(() => groupByWeek(pastMasses), [pastMasses]);
+  /** Semaine en cours (lundi → dimanche) : la « semaine récente », affichée par défaut. */
+  const currentWeekKey = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+  const recentWeekMasses = useMemo(() => {
+    const start = startOfWeek(new Date(), { weekStartsOn: 1 }).getTime();
+    const end = endOfWeek(new Date(), { weekStartsOn: 1 }).getTime();
+    return masses
+      .filter(m => {
+        const t = parseISO(m.date).getTime();
+        return t >= start && t <= end;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [masses]);
+
+  /** Semaines suivantes (après la semaine en cours) et semaines déjà célébrées (plus récentes d'abord). */
+  const futureGroups = useMemo(
+    () => groupByWeek(upcomingMasses).filter(([key]) => key > currentWeekKey),
+    [upcomingMasses, currentWeekKey],
+  );
+  const groupedPastMasses = useMemo(
+    () => groupByWeek(pastMasses).filter(([key]) => key < currentWeekKey),
+    [pastMasses, currentWeekKey],
+  );
 
   /** Par défaut, l'excuse vise la prochaine messe à venir. */
   useEffect(() => {
@@ -4026,8 +4046,14 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
     }
   }, [upcomingMasses, excuseTargetDate]);
 
-  /** Groupes affichés : la (ou les) prochaine(s) semaine(s) de messes, puis les messes passées si demandé. */
-  const visibleWeekGroups = showAllWeeks ? groupedMasses : groupedMasses.slice(0, 1);
+  const currentWeekGroup: [string, Mass[]] | null =
+    recentWeekMasses.length > 0 ? [currentWeekKey, recentWeekMasses] : null;
+  /** Affichage par défaut : la semaine récente ; sinon la prochaine semaine à venir. */
+  const visibleWeekGroups = showAllWeeks
+    ? [...(currentWeekGroup ? [currentWeekGroup] : []), ...futureGroups]
+    : currentWeekGroup
+      ? [currentWeekGroup]
+      : futureGroups.slice(0, 1);
   const allVisibleGroups = showPastMasses ? [...visibleWeekGroups, ...groupedPastMasses] : visibleWeekGroups;
 
   return (
@@ -4237,7 +4263,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
           </Card>
         )}
 
-        {/* Onglet Messes : prochaines célébrations (avant connexion) */}
+        {/* Onglet Messes : semaine récente par défaut, puis les semaines suivantes (avant connexion) */}
         {publicTab === 'masses' && (loading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <Logo className="w-16 h-16" showText={false} />
@@ -4247,7 +4273,9 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
           <div className="space-y-8 pb-32">
             {allVisibleGroups.map(([weekKey, weekMasses]) => (
               <div key={weekKey} className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-8">Semaine du {format(parseISO(weekKey), 'd MMMM yyyy', { locale: fr })}</h4>
+                <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-8">
+                  {weekKey === currentWeekKey ? 'Cette semaine · Semaine du ' : 'Semaine du '}{format(parseISO(weekKey), 'd MMMM yyyy', { locale: fr })}
+                </h4>
                 <hr className="border-slate-800" />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {weekMasses.map(mass => {
@@ -4376,27 +4404,29 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
                 </div>
               </div>
             ))}
-            {!showAllWeeks && groupedMasses.length > 1 && (
+            {!showAllWeeks && futureGroups.length > (currentWeekGroup ? 0 : 1) && (
               <div className="flex justify-center pt-8">
                 <Button onClick={() => setShowAllWeeks(true)} variant="outline" className="text-[10px] font-bold uppercase tracking-widest">
                   Voir les autres messes
                 </Button>
               </div>
             )}
-            {!loading && groupedMasses.length === 0 && (
+            {!loading && allVisibleGroups.length === 0 && (
               <div className="col-span-full py-24 text-center bg-slate-900/10 rounded-[64px] border border-dashed border-slate-800">
                   <CalendarDays size={48} className="mx-auto text-slate-800 mb-6" />
-                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Aucune célébration à venir pour le moment</p>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Aucune célébration récente ni à venir pour le moment</p>
               </div>
             )}
-            {pastMasses.length > 0 && (
+            {groupedPastMasses.length > 0 && (
               <div className="flex justify-center pt-8">
                 <Button
                   onClick={() => setShowPastMasses(!showPastMasses)}
                   variant="ghost"
                   className="text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:text-accent"
                 >
-                  {showPastMasses ? 'Masquer les messes passées' : `Voir les messes passées (${pastMasses.length})`}
+                  {showPastMasses
+                    ? 'Masquer les messes passées'
+                    : `Voir les messes passées (${groupedPastMasses.reduce((n, [, list]) => n + list.length, 0)})`}
                 </Button>
               </div>
             )}
