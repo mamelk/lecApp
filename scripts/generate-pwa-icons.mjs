@@ -1,6 +1,7 @@
 // Generates the PWA icons in public/icons/ without any dependency.
-// Design: dark rounded square, amber ring, amber cross on a soft glow —
-// the shield/cross identity of the lecApp logo, flattened for small sizes.
+// Design: the actual lecApp logo — the dark shield (écu) with its amber
+// outline, amber cross, gradient inner detail and slate flame curves —
+// placed on the dark rounded square (full square for the maskable variant).
 // Usage: node scripts/generate-pwa-icons.mjs
 import fs from 'node:fs';
 import zlib from 'node:zlib';
@@ -11,6 +12,8 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const BG = [11, 17, 32]; // #0B1120
 const AMBER = [245, 158, 11]; // #f59e0b
+const BLUE = [59, 130, 246]; // #3b82f6 (bottom of the shield gradient)
+const SLATE = [148, 163, 184]; // #94a3b8 (flame curves)
 
 /* ---------- PNG encoder (8-bit RGBA, no dependencies) ---------- */
 
@@ -54,7 +57,7 @@ const encodePng = (width, height, rgba) => {
   ]);
 };
 
-/* ---------- SDF helpers ---------- */
+/* ---------- Geometry helpers ---------- */
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smoothstep = (e0, e1, x) => {
@@ -64,13 +67,60 @@ const smoothstep = (e0, e1, x) => {
 const sdSegment = (px, py, ax, ay, bx, by) => {
   const pax = px - ax, pay = py - ay;
   const bax = bx - ax, bay = by - ay;
-  const h = clamp((pax * bax + pay * bay) / (bax * bax + bay * bay), 0, 1);
+  const len2 = bax * bax + bay * bay;
+  if (len2 === 0) return Math.hypot(pax, pay); // degenerate segment (0/0 → NaN)
+  const h = clamp((pax * bax + pay * bay) / len2, 0, 1);
   return Math.hypot(pax - bax * h, pay - bay * h);
 };
 const sdRoundedRect = (px, py, halfW, halfH, r) => {
   const qx = Math.abs(px) - (halfW - r);
   const qy = Math.abs(py) - (halfH - r);
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+};
+
+/** Cubic Bézier point at t. */
+const cubicAt = (p0, c1, c2, p1, t) => {
+  const u = 1 - t;
+  return [
+    u * u * u * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * p1[0],
+    u * u * u * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * p1[1],
+  ];
+};
+
+/** Flatten a chain of cubic segments [[p0,c1,c2,p1], ...] into a polyline. */
+const flattenCubics = (chain, perCurve = 28) => {
+  const pts = [];
+  for (const [p0, c1, c2, p1] of chain) {
+    const start = pts.length ? 1 : 0; // skip duplicated join points
+    for (let i = start; i <= perCurve; i++) {
+      pts.push(cubicAt(p0, c1, c2, p1, i / perCurve));
+    }
+  }
+  return pts;
+};
+
+/** Non-zero winding point-in-polygon test. */
+const pointInPoly = (x, y, poly) => {
+  let wn = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi <= y) {
+      if (yj > y && (xj - xi) * (y - yi) - (x - xi) * (yj - yi) > 0) wn++;
+    } else if (yj <= y && (xj - xi) * (y - yi) - (x - xi) * (yj - yi) < 0) {
+      wn--;
+    }
+  }
+  return wn !== 0;
+};
+
+/** Distance from a point to a polyline (0 inside the segments' capsules). */
+const distToPoly = (x, y, poly) => {
+  let d = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    d = Math.min(d, sdSegment(x, y, poly[j][0], poly[j][1], poly[i][0], poly[i][1]));
+  }
+  return d;
 };
 
 const over = (base, layerColor, alpha) => {
@@ -80,6 +130,24 @@ const over = (base, layerColor, alpha) => {
   return [mix(layerColor[0], base[0]), mix(layerColor[1], base[1]), mix(layerColor[2], base[2]), a];
 };
 
+/* ---------- The lecApp shield logo, in its 100-unit design space ----------
+   Same paths as the <Logo> component in src/App.tsx. */
+
+const SHIELD_OUTER = [
+  [[50, 5], [50, 5], [15, 15], [15, 45]],
+  [[15, 45], [15, 75], [50, 95], [50, 95]],
+  [[50, 95], [50, 95], [85, 75], [85, 45]],
+  [[85, 45], [85, 15], [50, 5], [50, 5]],
+];
+const SHIELD_INNER = [
+  [[50, 12], [50, 12], [22, 20], [22, 45]],
+  [[22, 45], [22, 70], [50, 88], [50, 88]],
+  [[50, 88], [50, 88], [78, 70], [78, 45]],
+  [[78, 45], [78, 20], [50, 12], [50, 12]],
+];
+const FLAME_LEFT = [[[50, 15], [40, 30], [35, 50], [50, 85]]];
+const FLAME_RIGHT = [[[50, 15], [60, 30], [65, 50], [50, 85]]];
+
 /* ---------- Rendering ---------- */
 
 const renderIcon = (size, { maskable = false } = {}) => {
@@ -87,8 +155,30 @@ const renderIcon = (size, { maskable = false } = {}) => {
   const SS = 3; // supersampling for smooth edges
   const cx = size / 2;
   const cy = size / 2;
-  const arm = size * (maskable ? 0.19 : 0.235); // half length of the cross arms
-  const thick = (size * (maskable ? 0.085 : 0.1)) / 2; // half thickness
+  // Logo-space (100 units tall) → icon space. Maskable keeps the whole
+  // shield inside the central 80% safe zone.
+  const sc = (size * (maskable ? 0.7 : 0.76)) / 100;
+  const boost = size < 96 ? 1.5 : 1; // small sizes need thicker strokes
+  const L = (x, y) => [(x - 50) * sc + cx, (y - 50) * sc + cy];
+  const toPoly = (chain) => flattenCubics(chain).map(([x, y]) => L(x, y));
+
+  const outerPoly = toPoly(SHIELD_OUTER);
+  const innerPoly = toPoly(SHIELD_INNER);
+  const flameLeft = toPoly(FLAME_LEFT);
+  const flameRight = toPoly(FLAME_RIGHT);
+  const [crossTopX, crossTopY] = L(50, 25);
+  const [crossBotX, crossBotY] = L(50, 75);
+  const [crossLeftX, crossBarY] = L(35, 45);
+  const [crossRightX] = L(65, 45);
+  const [glowX, glowY] = L(50, 45);
+  const glowR = 15 * sc;
+
+  const outerStroke = 2 * sc * boost; // px
+  const crossHalf = (4 * sc * boost) / 2;
+  const flameHalf = (2 * sc * boost) / 2;
+  const shieldTopY = L(0, 5)[1];
+  const shieldBotY = L(0, 95)[1];
+
   const corner = size * 0.22;
   const ringInset = size * 0.055;
   const ringHalf = size * 0.012;
@@ -104,24 +194,45 @@ const renderIcon = (size, { maskable = false } = {}) => {
       pixel = [BG[0], BG[1], BG[2], 1];
     }
 
-    // soft amber glow behind the cross
+    // soft amber glow behind the shield
     const r = Math.hypot(px - cx, py - cy) / (size * 0.45);
-    const glow = 0.3 * Math.exp(-r * r);
-    pixel = over(pixel, AMBER, glow);
+    pixel = over(pixel, AMBER, 0.12 * Math.exp(-r * r));
 
-    // amber outline (non-maskable only)
+    // amber outline of the shield tile (non-maskable only)
     if (!maskable) {
       const d = sdRoundedRect(px - cx, py - cy, size / 2, size / 2, corner) + ringInset;
       const ring = 1 - smoothstep(ringHalf - 0.5, ringHalf + 0.5, Math.abs(d));
-      pixel = over(pixel, AMBER, ring);
+      pixel = over(pixel, AMBER, ring * 0.8);
     }
 
-    // Latin cross: longer vertical bar, crossbar in the upper third
-    const vertical = sdSegment(px, py, cx, cy - arm * 1.3, cx, cy + arm * 1.3);
-    const barY = cy - arm * 0.45;
-    const horizontal = sdSegment(px, py, cx - arm * 0.85, barY, cx + arm * 0.85, barY);
-    const cross = 1 - smoothstep(thick - 0.6, thick + 0.6, Math.min(vertical, horizontal));
-    pixel = over(pixel, AMBER, cross);
+    // shield base fill + inner amber→blue gradient (opacity 0.2, as in-app)
+    if (pointInPoly(px, py, outerPoly)) {
+      pixel = over(pixel, BG, 1);
+      if (pointInPoly(px, py, innerPoly)) {
+        const t = clamp((py - shieldTopY) / (shieldBotY - shieldTopY), 0, 1);
+        const grad = AMBER.map((c, i) => c + (BLUE[i] - c) * t);
+        pixel = over(pixel, grad, 0.2);
+      }
+    }
+
+    // shield outline
+    const dOuter = distToPoly(px, py, outerPoly);
+    pixel = over(pixel, AMBER, 1 - smoothstep(outerStroke / 2 - 0.6, outerStroke / 2 + 0.6, dOuter));
+
+    // cross (round caps, as in-app)
+    const cross = Math.min(
+      sdSegment(px, py, crossTopX, crossTopY, crossBotX, crossBotY),
+      sdSegment(px, py, crossLeftX, crossBarY, crossRightX, crossBarY),
+    );
+    pixel = over(pixel, AMBER, 1 - smoothstep(crossHalf - 0.6, crossHalf + 0.6, cross));
+
+    // flame curves
+    const flame = Math.min(distToPoly(px, py, flameLeft), distToPoly(px, py, flameRight));
+    pixel = over(pixel, SLATE, 0.6 * (1 - smoothstep(flameHalf - 0.6, flameHalf + 0.6, flame)));
+
+    // subtle glow circle at the cross centre (topmost, as in-app)
+    const dGlow = Math.hypot(px - glowX, py - glowY);
+    pixel = over(pixel, AMBER, 0.1 * (1 - smoothstep(glowR * 0.85, glowR, dGlow)));
 
     return pixel;
   };
@@ -175,14 +286,25 @@ const encodeIco = (png) => {
 const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.35"/>
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.12"/>
       <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="shield-grad" x1="50" y1="5" x2="50" y2="95" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="#0B1120"/>
-  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
-  <rect x="28" y="28" width="456" height="456" rx="84" fill="none" stroke="#f59e0b" stroke-width="12"/>
-  <path d="M256 100V412 M154 202H358" fill="none" stroke="#f59e0b" stroke-width="51" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="230" fill="url(#glow)"/>
+  <rect x="28" y="28" width="456" height="456" rx="84" fill="none" stroke="#f59e0b" stroke-width="10" opacity="0.8"/>
+  <g transform="translate(256 256) scale(3.9) translate(-50 -50)">
+    <path d="M50 5C50 5 15 15 15 45C15 75 50 95 50 95C50 95 85 75 85 45C85 15 50 5 50 5Z" fill="#0B1120" stroke="#f59e0b" stroke-width="2"/>
+    <path d="M50 12C50 12 22 20 22 45C22 70 50 88 50 88C50 88 78 70 78 45C78 20 50 12 50 12Z" fill="url(#shield-grad)" fill-opacity="0.2"/>
+    <path d="M50 25V75M35 45H65" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round"/>
+    <path d="M50 15C40 30 35 50 50 85" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <path d="M50 15C60 30 65 50 50 85" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <circle cx="50" cy="45" r="15" fill="#f59e0b" fill-opacity="0.1"/>
+  </g>
 </svg>
 `;
 

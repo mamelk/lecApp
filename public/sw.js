@@ -3,7 +3,7 @@
    - build assets (hashed): cache first, they never change name
    - cross-origin requests (Firestore, Auth): ignored, handled by the SDK */
 
-const CACHE_NAME = 'lecapp-v5';
+const CACHE_NAME = 'lecapp-v6';
 
 // Assets the launcher needs to draw the app icon in the device's app list:
 // the manifest plus every icon, cached at install time so the logo resolves
