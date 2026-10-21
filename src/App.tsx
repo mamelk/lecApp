@@ -3811,6 +3811,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
   const [plannings, setPlannings] = useState<Record<string, Planning>>({});
   const [readers, setReaders] = useState<Reader[]>([]);
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedMassReaders, setExpandedMassReaders] = useState<Record<string, boolean>>({});
   const [showAllWeeks, setShowAllWeeks] = useState(false);
@@ -3835,6 +3836,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
   ];
   const [showPastMasses, setShowPastMasses] = useState(false);
   const [excuseTargetDate, setExcuseTargetDate] = useState('');
+  const [excuseTargetType, setExcuseTargetType] = useState<'mass' | 'meeting'>('mass');
 
   /** Inscription directe sur cette paroisse : aucun code administrateur. */
   const submitRegistration = async () => {
@@ -3985,10 +3987,17 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
       setFeedbacks(f);
     });
 
-    return () => { unsubMasses(); unsubPlannings(); unsubReaders(); unsubFeedbacks(); };
+    const mtQ = query(collection(db, 'meetings'), where('parishId', '==', parish.id), orderBy('date', 'asc'));
+    const unsubMeetings = onSnapshot(mtQ, (snapshot) => {
+      const mt: Meeting[] = [];
+      snapshot.forEach(d => mt.push({ ...d.data() as Meeting, id: d.id }));
+      setMeetings(mt);
+    });
+
+    return () => { unsubMasses(); unsubPlannings(); unsubReaders(); unsubFeedbacks(); unsubMeetings(); };
     // Dépendre de l'id uniquement : une nouvelle instance de l'objet parish
     // (à chaque snapshot de la liste des paroisses) ne doit pas reconstruire
-    // les 4 abonnements — chaque réabonnement relit toute la collection.
+    // les 5 abonnements — chaque réabonnement relit toute la collection.
   }, [parish?.id]);
 
   const groupByWeek = (list: Mass[]) => {
@@ -4016,6 +4025,13 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
       .sort((a, b) => b.date.localeCompare(a.date)),
     [masses],
   );
+  /** Réunions à venir (chronologique), utilisables comme cible d'excuse. */
+  const upcomingMeetings = useMemo(
+    () => meetings
+      .filter(m => parseISO(m.date).getTime() >= Date.now())
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    [meetings],
+  );
   /** Semaine en cours (lundi → dimanche) : la « semaine récente », affichée par défaut. */
   const currentWeekKey = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
   const recentWeekMasses = useMemo(() => {
@@ -4039,12 +4055,32 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
     [pastMasses, currentWeekKey],
   );
 
-  /** Par défaut, l'excuse vise la prochaine messe à venir. */
+  /** Par défaut, l'excuse vise la prochaine célébration : une messe, ou à défaut une réunion. */
   useEffect(() => {
-    if (!excuseTargetDate && upcomingMasses.length > 0) {
-      setExcuseTargetDate(upcomingMasses[0].date);
+    if (excuseTargetDate) return;
+    if (excuseTargetType === 'mass') {
+      if (upcomingMasses.length > 0) setExcuseTargetDate(upcomingMasses[0].date);
+      else if (upcomingMeetings.length > 0) {
+        setExcuseTargetType('meeting');
+        setExcuseTargetDate(upcomingMeetings[0].date);
+      }
+    } else if (upcomingMeetings.length > 0) {
+      setExcuseTargetDate(upcomingMeetings[0].date);
     }
-  }, [upcomingMasses, excuseTargetDate]);
+  }, [excuseTargetDate, excuseTargetType, upcomingMasses, upcomingMeetings]);
+
+  /** Bascule entre une messe et une réunion comme cible d'excuse. */
+  const switchExcuseType = (type: 'mass' | 'meeting') => {
+    setExcuseTargetType(type);
+    const list = type === 'mass' ? upcomingMasses : upcomingMeetings;
+    setExcuseTargetDate(list.length > 0 ? list[0].date : '');
+  };
+
+  /** Événement visé par la modale d'excuse (messe ou réunion). */
+  const excuseTarget = useMemo(() => {
+    const list = excuseTargetType === 'mass' ? upcomingMasses : upcomingMeetings;
+    return list.find(e => e.date === excuseModal.date) ?? null;
+  }, [excuseTargetType, upcomingMasses, upcomingMeetings, excuseModal.date]);
 
   const currentWeekGroup: [string, Mass[]] | null =
     recentWeekMasses.length > 0 ? [currentWeekKey, recentWeekMasses] : null;
@@ -4233,21 +4269,56 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
           <Card className="border-accent/20 bg-accent/5">
             <SectionTitle icon={FileText}>Présenter mes excuses</SectionTitle>
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-slate-400">
-              Vous ne pouvez pas assister à une célébration ? Présentez vos excuses à
+              Vous ne pouvez pas assister à une messe ou à une réunion ? Présentez vos excuses à
               l'administration de la paroisse <b className="text-slate-300">avant même de vous
-              connecter</b> : choisissez la messe concernée puis indiquez votre nom et votre motif.
+              connecter</b> : choisissez l'événement concerné puis indiquez votre nom et votre motif.
             </p>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Célébration concernée">
+
+            {/* Type d'événement visé : une messe ou une réunion */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {([
+                { id: 'mass' as const, label: 'Une messe' },
+                { id: 'meeting' as const, label: 'Une réunion' },
+              ]).map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => switchExcuseType(id)}
+                  aria-pressed={excuseTargetType === id}
+                  className={`px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all ${
+                    excuseTargetType === id
+                      ? 'bg-accent text-midnight border-accent shadow-lg shadow-amber-500/10'
+                      : 'bg-slate-900/40 text-slate-400 border-slate-800 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label={excuseTargetType === 'mass' ? 'Messe concernée' : 'Réunion concernée'}>
                 <Select value={excuseTargetDate} onChange={(e) => setExcuseTargetDate(e.target.value)}>
-                  {upcomingMasses.length === 0 ? (
-                    <option value="">Aucune messe à venir programmée</option>
+                  {excuseTargetType === 'mass' ? (
+                    upcomingMasses.length === 0 ? (
+                      <option value="">Aucune messe à venir programmée</option>
+                    ) : (
+                      upcomingMasses.map(m => (
+                        <option key={m.id} value={m.date}>
+                          {`${m.title} — ${format(parseISO(m.date), 'EEEE d MMMM · HH:mm', { locale: fr })}`}
+                        </option>
+                      ))
+                    )
                   ) : (
-                    upcomingMasses.map(m => (
-                      <option key={m.id} value={m.date}>
-                        {`${m.title} — ${format(parseISO(m.date), 'EEEE d MMMM · HH:mm', { locale: fr })}`}
-                      </option>
-                    ))
+                    upcomingMeetings.length === 0 ? (
+                      <option value="">Aucune réunion à venir programmée</option>
+                    ) : (
+                      upcomingMeetings.map(m => (
+                        <option key={m.id} value={m.date}>
+                          {`${m.title}${m.location ? ` — ${m.location}` : ''} · ${format(parseISO(m.date), 'EEEE d MMMM · HH:mm', { locale: fr })}`}
+                        </option>
+                      ))
+                    )
                   )}
                 </Select>
               </Field>
@@ -4437,6 +4508,7 @@ const PublicParishConsultation = ({ parish, onBack, onAdminRequest, onEstechClic
         isOpen={excuseModal.isOpen} 
         onClose={() => setExcuseModal({isOpen: false, date: ''})} 
         date={excuseModal.date}
+        targetLabel={excuseTarget ? `${excuseTargetType === 'mass' ? 'Messe' : 'Réunion'} — ${excuseTarget.title}, ${format(parseISO(excuseTarget.date), 'EEEE d MMMM · HH:mm', { locale: fr })}` : undefined}
         readers={readers}
         parishId={parish.id}
       />

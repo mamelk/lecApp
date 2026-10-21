@@ -11,9 +11,11 @@ interface Props {
   date: string;
   readers: Reader[];
   parishId: string;
+  /** Libellé de l'événement visé (messe ou réunion), affiché en haut de la modale. */
+  targetLabel?: string;
 }
 
-export const ExcuseModal: React.FC<Props> = ({ isOpen, onClose, date, readers, parishId }) => {
+export const ExcuseModal: React.FC<Props> = ({ isOpen, onClose, date, readers, parishId, targetLabel }) => {
   const [readerId, setReaderId] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -50,6 +52,10 @@ export const ExcuseModal: React.FC<Props> = ({ isOpen, onClose, date, readers, p
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Présenter mes excuses">
       <div className="space-y-4">
+        {targetLabel && (
+          <p className="text-[10px] font-bold uppercase tracking-widest text-accent">{targetLabel}</p>
+        )}
+
         <Field label="Lecteur concerné">
           <Select value={readerId} onChange={(e) => setReaderId(e.target.value)}>
             <option value="">Sélectionner un lecteur</option>
