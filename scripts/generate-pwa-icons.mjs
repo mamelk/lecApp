@@ -126,22 +126,28 @@ const renderIcon = (size, { maskable = false } = {}) => {
     return pixel;
   };
 
-  const perRow = size * SS * 4;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
+      // Premultiplied accumulation: colours weighted by coverage so edge
+      // samples (which are transparent black) don't darken the outline.
       let accR = 0, accG = 0, accB = 0, accA = 0;
       for (let sy = 0; sy < SS; sy++) {
         for (let sx = 0; sx < SS; sx++) {
           const [r, g, b, a] = sample(x + (sx + 0.5) / SS, y + (sy + 0.5) / SS);
-          accR += r; accG += g; accB += b; accA += a;
+          accR += r * a; accG += g * a; accB += b * a; accA += a;
         }
       }
       const n = SS * SS;
+      const meanA = accA / n; // coverage in 0..1
       const i = (y * size + x) * 4;
-      rgba[i] = Math.round(accR / n);
-      rgba[i + 1] = Math.round(accG / n);
-      rgba[i + 2] = Math.round(accB / n);
-      rgba[i + 3] = Math.round(accA / n);
+      if (meanA <= 0) {
+        rgba[i] = 0; rgba[i + 1] = 0; rgba[i + 2] = 0; rgba[i + 3] = 0;
+        continue;
+      }
+      rgba[i] = Math.round(accR / accA);
+      rgba[i + 1] = Math.round(accG / accA);
+      rgba[i + 2] = Math.round(accB / accA);
+      rgba[i + 3] = Math.round(meanA * 255); // 0..1 → 0..255
     }
   }
   return encodePng(size, size, rgba);
