@@ -16,6 +16,13 @@ exports.notifyMassCreated = onDocumentCreated('masses/{massId}', async (event) =
   const mass = event.data.data();
   if (!mass || !mass.parishId) return;
 
+  // Une messe déjà passée ne déclenche pas d'alerte « nouvelle messe ».
+  const massTime = mass.date ? new Date(mass.date).getTime() : Number.NaN;
+  if (!Number.isNaN(massTime) && massTime < Date.now()) {
+    console.log('Messe déjà passée, aucun push envoyé :', event.params.massId);
+    return;
+  }
+
   const tokensSnap = await admin
     .firestore()
     .collection(TOKENS_COLLECTION)
@@ -39,26 +46,27 @@ exports.notifyMassCreated = onDocumentCreated('masses/{massId}', async (event) =
     : '';
   const body = dateLabel ? `${mass.title} — ${dateLabel}` : mass.title;
 
-  const message = {
-    notification: {
-      title: 'Nouvelle messe programmée',
-      body,
-    },
-    webpush: {
-      notification: {
-        title: 'Nouvelle messe programmée',
-        body,
-        icon: '/icons/icon-192.png',
-        badge: '/icons/icon-192.png',
-        tag: `mass-${event.params.massId}`,
-        renotify: true,
-      },
-      fcmOptions: { link: '/' },
-    },
-    // Les tokens FCM web ; les tokens invalides sont nettoyés plus bas.
+  // Message « data-only » : c'est le service worker de l'app (public/sw.js)
+  // qui affiche la notification. Un bloc `notification` serait affiché
+  // automatiquement par le navigateur, même quand l'app est ouverte au
+  // premier plan — d'où une double alerte impossible à filtrer.
+  const data = {
+    title: 'Nouvelle messe programmée',
+    body,
+    massId: event.params.massId,
+    url: '/',
   };
 
-  const tokens = tokensSnap.docs.map((d) => ({ id: d.id, token: d.data().token }));
+  const tokens = tokensSnap.docs
+    .map((d) => ({ id: d.id, token: d.data().token, uid: d.data().uid || null }))
+    .filter((t) => Boolean(t.token))
+    // L'auteur de la messe a déjà l'app ouverte : pas de push pour lui.
+    .filter((t) => !mass.createdBy || t.uid !== mass.createdBy);
+
+  if (!tokens.length) {
+    console.log('Aucun appareil à notifier (auteur exclu) pour', mass.parishId);
+    return;
+  }
 
   // Envoyer par lots de 500 (limite FCM).
   const results = [];
@@ -66,8 +74,11 @@ exports.notifyMassCreated = onDocumentCreated('masses/{massId}', async (event) =
     const batch = tokens.slice(i, i + 500);
     const res = await admin.messaging().sendEachForMulticast({
       tokens: batch.map((t) => t.token),
-      notification: message.notification,
-      webpush: message.webpush,
+      data,
+      webpush: {
+        // Livraison immédiate : une messe programmée est un événement daté.
+        headers: { urgency: 'high' },
+      },
     });
     results.push({ batch, res });
   }

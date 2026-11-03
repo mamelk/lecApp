@@ -3149,6 +3149,9 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
         parishId,
         date: massDate.toISOString(),
         title,
+        // Permet à la Cloud Function de ne pas pousser la notification vers
+        // l'appareil qui vient de créer la messe.
+        createdBy: auth.currentUser?.uid ?? null,
         maxReaders: 4,
         createdAt: serverTimestamp(),
         commentatorFileData: commentatorFile?.data || null,

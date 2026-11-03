@@ -3,6 +3,7 @@ import { Bell, BellOff, BellRing } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui';
 import {
+  ensurePushSubscription,
   notificationsSupported,
   permissionState,
   pushConfigured,
@@ -25,6 +26,14 @@ export const NotificationsBell: React.FC<{ parishId: string | null }> = ({ paris
   useEffect(() => {
     setPermission(permissionState());
   }, []);
+
+  // Permission déjà accordée mais jeton push absent (première visite après
+  // acceptation, ancienne version de l'app, échec réseau…) : on ré-abonne
+  // silencieusement, sinon cet appareil ne reçoit jamais de push app fermée.
+  useEffect(() => {
+    if (!parishId || permission !== 'granted') return;
+    void ensurePushSubscription(parishId);
+  }, [parishId, permission]);
 
   if (permission === 'unsupported') return null;
 

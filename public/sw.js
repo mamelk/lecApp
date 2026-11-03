@@ -3,7 +3,7 @@
    - build assets (hashed): cache first, they never change name
    - cross-origin requests (Firestore, Auth): ignored, handled by the SDK */
 
-const CACHE_NAME = 'lecapp-v6';
+const CACHE_NAME = 'lecapp-v7';
 
 // Assets the launcher needs to draw the app icon in the device's app list:
 // the manifest plus every icon, cached at install time so the logo resolves
@@ -40,29 +40,41 @@ self.addEventListener('activate', (event) => {
 // Push notifications (FCM Web Push): display in the system notification
 // panel even when the app is closed. The payload comes from the Cloud
 // Function triggered on mass creation (see functions/index.js).
+//
+// Data-only message (no `notification` block) so this service worker alone
+// decides when to display something: FCM would otherwise auto-display the
+// notification even though the open app already showed its own.
 self.addEventListener('push', (event) => {
-  let payload = { title: 'lecApp', body: 'Nouvelle messe programmée' };
+  const payload = { title: 'lecApp', body: 'Nouvelle messe programmée', url: '/', massId: null };
   try {
     const data = event.data ? event.data.json() : null;
-    if (data) {
-      payload = {
-        title: (data.notification && data.notification.title) || data.title || payload.title,
-        body: (data.notification && data.notification.body) || data.body || payload.body,
-        url: (data.notification && data.notification.url) || data.url || '/',
-      };
-    }
+    // FCM wraps a data-only message as { data: {...}, from, fcmMessageId }.
+    const raw = (data && data.data) || data || {};
+    const notification = (data && data.notification) || {};
+    payload.title = raw.title || notification.title || payload.title;
+    payload.body = raw.body || notification.body || payload.body;
+    payload.url = raw.url || notification.url || payload.url;
+    payload.massId = raw.massId || raw.mass_id || null;
   } catch (e) {
     // Non-JSON payload: keep the defaults.
   }
+
   event.waitUntil(
-    self.registration.showNotification(payload.title, {
-      body: payload.body,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      tag: 'lecapp-mass',
-      renotify: true,
-      data: { url: payload.url },
-    }),
+    (async () => {
+      // App visible au premier plan : le snapshot Firestore a déjà affiché
+      // l'alerte, on n'ajoute pas une seconde notification système.
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if (windows.some((client) => client.visibilityState === 'visible' || client.focused)) return;
+
+      await self.registration.showNotification(payload.title, {
+        body: payload.body,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        tag: payload.massId ? `mass-${payload.massId}` : 'lecapp-mass',
+        renotify: true,
+        data: { url: payload.url },
+      });
+    })(),
   );
 });
 

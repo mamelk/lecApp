@@ -21,6 +21,21 @@
     <meta name="apple-mobile-web-app-title" content="lecApp" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Capture du prompt d'installation natif dès le chargement : Chrome/Edge
+         peuvent l'émettre avant le montage de React, et Safari/Firefox ne
+         l'émettent jamais (l'app affiche alors ses propres instructions). -->
+    <script>
+      window.__lecappInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function (event) {
+        event.preventDefault();
+        window.__lecappInstallPrompt = event;
+        window.dispatchEvent(new Event('lecapp:installprompt'));
+      });
+      window.addEventListener('appinstalled', function () {
+        window.__lecappInstallPrompt = null;
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
