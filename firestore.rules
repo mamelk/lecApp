@@ -225,6 +225,21 @@ service cloud.firestore {
       allow write: if false; // Managed via console
     }
 
+    // Compteur de visiteurs : un document par jour ("AAAA-MM-JJ"), contenant
+    // uniquement { day, count, updatedAt }. Lecture publique (affichage du
+    // compteur), écriture ouverte aux visiteurs qui incrémentent +1.
+    match /visits_daily/{dayId} {
+      allow get, list: if true;
+      allow create: if isValidId(dayId) &&
+                       incoming().day == dayId &&
+                       incoming().count is int && incoming().count == 1;
+      allow update: if isValidId(dayId) &&
+                       incoming().day == dayId &&
+                       incoming().count is int &&
+                       incoming().count == existing().count + 1;
+      allow delete: if false;
+    }
+
     // Jetons d'abonnement push (FCM Web Push) : chaque appareil écrit son
     // propre jeton ; la collection n'est jamais lue côté client (la Cloud
     // Function la lit avec les droits admin).

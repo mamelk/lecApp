@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, CheckCircle, Monitor, Share, Smartphone, X } from 'lucide-react';
+import { CheckCircle, Download, ExternalLink, Monitor, Share, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Modal } from './ui';
 
@@ -45,12 +45,17 @@ const isTouchDevice = (): boolean => {
 };
 
 /**
- * Installation de l'app sur tous les appareils :
- * - bannière discrète proposée sur mobile (Chrome, Safari, Firefox, Samsung…),
- *   pas seulement quand le navigateur émet `beforeinstallprompt` ;
- * - prompt natif utilisé quand il est disponible ;
- * - instructions détaillées (iOS, Android, ordinateur) sinon ;
- * - masqué une fois l'app installée, ou après refus explicite (7 jours).
+ * Installation de l'app sur tous les appareils.
+ *
+ * Aucun navigateur n'expose une API d'installation universelle :
+ *  - Chrome / Edge / Samsung Internet émettent `beforeinstallprompt` (prompt natif) ;
+ *  - Safari iOS n'a que « Partager → Sur l'écran d'accueil » ;
+ *  - Firefox n'installe pas de PWA (il faut passer par Chrome) ;
+ *  - les navigateurs intégrés (WhatsApp, Facebook, Instagram…) ne peuvent
+ *    pas installer du tout : on propose alors d'ouvrir le site dans Chrome.
+ *
+ * La bannière est donc affichée sur mobile quel que soit le navigateur, et le
+ * guide reste accessible à tout moment depuis le bouton « Installer l'app ».
  */
 export const InstallPWA: React.FC = () => {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
@@ -63,6 +68,7 @@ export const InstallPWA: React.FC = () => {
     const onBeforeInstall = (event: Event) => {
       event.preventDefault();
       setDeferred(event as BeforeInstallPromptEvent);
+      setShowBanner(true);
     };
     const onInstalled = () => {
       setInstalled(true);
@@ -75,13 +81,23 @@ export const InstallPWA: React.FC = () => {
     // Événement capturé par le script inline d'index.html avant le montage.
     if (window.__lecappInstallPrompt) setDeferred(window.__lecappInstallPrompt);
 
+    // L'app installée peut être ouverte depuis le navigateur : l'affichage
+    // passe alors en mode standalone, sans recharger la page.
+    const displayMode = window.matchMedia('(display-mode: standalone)');
+    const onDisplayMode = () => {
+      if (displayMode.matches) onInstalled();
+    };
+
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('lecapp:installprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onInstalled);
+    displayMode.addEventListener?.('change', onDisplayMode);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstall);
       window.removeEventListener('lecapp:installprompt', onBeforeInstall);
       window.removeEventListener('appinstalled', onInstalled);
+      displayMode.removeEventListener?.('change', onDisplayMode);
     };
   }, []);
 
@@ -143,10 +159,32 @@ export const InstallPWA: React.FC = () => {
   const isFirefox = /Firefox\//.test(ua);
   const isSafari =
     /Safari\//.test(ua) && !/Chrome\//.test(ua) && !/Chromium\//.test(ua) && !/Edg\//.test(ua);
-  // Navigateur intégré (WhatsApp, Facebook, Instagram…) : l'installation y est impossible.
+  // Navigateur intégré (WhatsApp, Facebook, Instagram…) : installation impossible.
   const isInAppBrowser = /FBAN|FBAV|FB_IAB|Instagram|Line\/|Twitter/i.test(ua);
 
+  /**
+   * Depuis un navigateur intégré Android, seule une intention Android permet
+   * de sortir vers Chrome — c'est ce qui débloque l'installation « sur tous
+   * les appareils ». Sur iOS aucune redirection n'est possible : le guide
+   * demande explicitement d'ouvrir Safari.
+   */
+  const openInChrome = () => {
+    if (typeof window === 'undefined') return;
+    const { host, pathname, search } = window.location;
+    window.location.href = `intent://${host}${pathname}${search}#Intent;scheme=https;package=com.android.chrome;end`;
+  };
+
   const steps: { icon: React.ReactNode; title: string; detail: string }[] = [];
+
+  if (isInAppBrowser) {
+    steps.unshift({
+      icon: <Smartphone size={16} />,
+      title: 'Depuis une application (WhatsApp, Facebook…)',
+      detail: isAndroid
+        ? "Ces navigateurs intégrés ne peuvent pas installer d'app : utilisez « Ouvrir dans Chrome » ci-dessous, puis installez."
+        : "Ces navigateurs intégrés ne peuvent pas installer d'app : copiez le lien et ouvrez-le dans Safari.",
+    });
+  }
 
   if (isIOS) {
     steps.push({
@@ -187,24 +225,19 @@ export const InstallPWA: React.FC = () => {
     });
   }
 
-  if (isInAppBrowser) {
-    steps.unshift({
-      icon: <Smartphone size={16} />,
-      title: 'Depuis une application (WhatsApp, Facebook…)',
-      detail:
-        "Ces navigateurs intégrés ne peuvent pas installer d'app : ouvrez lecApp dans Chrome ou Safari.",
-    });
-  }
-
   const bannerText = deferred
     ? 'Accès direct depuis votre écran d’accueil, en plein écran.'
-    : isIOS && !isSafari
-      ? 'Ouvrez lecApp dans Safari pour l’ajouter à votre écran d’accueil.'
-      : isIOS
-        ? 'Partagez → « Sur l’écran d’accueil » pour installer lecApp.'
-        : isAndroid
-          ? 'Menu ⋮ → « Installer lecApp » pour l’ajouter à votre écran d’accueil.'
-          : 'Ajoutez lecApp pour un accès direct, en plein écran.';
+    : isInAppBrowser
+      ? isAndroid
+        ? 'Ouvrez cette page dans Chrome pour pouvoir l’installer.'
+        : 'Ouvrez cette page dans Safari pour pouvoir l’installer.'
+      : isIOS && !isSafari
+        ? 'Ouvrez lecApp dans Safari pour l’ajouter à votre écran d’accueil.'
+        : isIOS
+          ? 'Partagez → « Sur l’écran d’accueil » pour installer lecApp.'
+          : isAndroid
+            ? 'Menu ⋮ → « Installer lecApp » pour l’ajouter à votre écran d’accueil.'
+            : 'Ajoutez lecApp pour un accès direct, en plein écran.';
 
   return (
     <>
@@ -258,6 +291,13 @@ export const InstallPWA: React.FC = () => {
             lecApp s'installe comme une application native : elle ouvre en plein écran, sans barre
             d'adresse, avec son propre raccourci.
           </p>
+
+          {isInAppBrowser && isAndroid && (
+            <Button variant="accent" className="w-full" onClick={openInChrome}>
+              <ExternalLink size={15} /> Ouvrir dans Chrome
+            </Button>
+          )}
+
           <div className="space-y-3">
             {steps.map((step, i) => (
               <div
@@ -272,6 +312,13 @@ export const InstallPWA: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {deferred && (
+            <Button variant="accent" className="w-full" onClick={install}>
+              <Download size={15} /> Lancer l'installation
+            </Button>
+          )}
+
           <p className="text-[10px] italic text-slate-600">
             Astuce : après installation, l'application garde votre session et s'ouvre même hors-ligne
             (les données Firestore nécessitent le réseau).

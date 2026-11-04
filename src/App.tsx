@@ -114,6 +114,8 @@ import { ExcuseModal } from './components/ExcuseModal';
 import { ExcusesView } from './components/ExcusesView';
 import { InstallPWA } from './components/InstallPWA';
 import { NotificationsBell } from './components/NotificationsBell';
+import { VisitorsCard } from './components/VisitorsCard';
+import { trackVisit } from './lib/visits';
 import { markMassCreatedLocally, notifyNewMassesFromSnapshot } from './lib/notifications';
 import { Button, Card, Badge, PageHeader, SectionTitle, StatCard, Field, Input, Select, EmptyState, Modal, inputClass } from './components/ui';
 import { NAV_GROUPS, NAV_ITEMS, getNavItem, MOBILE_PRIMARY, NavId } from './navigation';
@@ -319,6 +321,8 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
         </div>
 
         <aside className="space-y-6">
+          <VisitorsCard />
+
           <Card
             className="group cursor-pointer border-accent/20 bg-gradient-to-br from-accent/10 to-transparent hover:border-accent"
             onClick={() => onNavigate('stats')}
@@ -366,14 +370,16 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
   );
 };
 
-  const ReadersView = ({ readers, parishId, onRefresh, attendance, plannings, masses, feedbacks }: { 
+  const ReadersView = ({ readers, parishId, onRefresh, attendance, plannings, masses, feedbacks, onReaderPatched }: { 
     readers: Reader[], 
     parishId: string, 
     onRefresh: () => void,
     attendance: Attendance[],
     plannings: Record<string, Planning>,
     masses: Mass[],
-    feedbacks: Feedback[]
+    feedbacks: Feedback[],
+    /** Applique la modification dans la liste affichée sans attendre le serveur. */
+    onReaderPatched: (id: string, patch: Partial<Reader>) => void
   }) => {
   const { currentParish } = useContext(ParishContext);
   const [showAdd, setShowAdd] = useState(false);
@@ -489,10 +495,13 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
     const validated = reader.disciplineValidated !== true;
     try {
       if (validated) {
+        const at = new Date().toISOString();
         await updateDoc(doc(db, 'readers', reader.id), {
           disciplineValidated: true,
-          disciplineValidatedAt: new Date().toISOString(),
+          disciplineValidatedAt: at,
         });
+        // Mise à jour immédiate de la liste : plus besoin de recharger la page.
+        onReaderPatched(reader.id, { disciplineValidated: true, disciplineValidatedAt: at });
         toast.success(`${reader.prenom} ${reader.name} : discipline validée`);
       } else {
         if (!(await confirmAsync(`Retirer la validation discipline de ${reader.prenom} ${reader.name} ?`, 'Retirer'))) return;
@@ -500,6 +509,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
           disciplineValidated: false,
           disciplineValidatedAt: null,
         });
+        onReaderPatched(reader.id, { disciplineValidated: false, disciplineValidatedAt: undefined });
         toast.warning('Validation discipline retirée');
       }
     } catch (e) {
@@ -553,6 +563,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
   const updateStatus = async (id: string, status: TrainingStatus) => {
     try {
       await updateDoc(doc(db, 'readers', id), { trainingStatus: status });
+      onReaderPatched(id, { trainingStatus: status });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `readers/${id}`);
     }
@@ -847,7 +858,7 @@ const DashboardView = ({ readers, upcomingMasses, upcomingMeetings, attendanceRe
 
 
 
-const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[], readers: Reader[], meetings: Meeting[], parishId: string }) => {
+const PlanningView = ({ masses, readers, meetings, parishId, onReaderPatched }: { masses: Mass[], readers: Reader[], meetings: Meeting[], parishId: string, onReaderPatched: (id: string, patch: Partial<Reader>) => void }) => {
   const { currentParish } = useContext(ParishContext);
   const [selectedMass, setSelectedMass] = useState<Mass | null>(null);
   const [plannings, setPlannings] = useState<Record<string, Planning>>({});
@@ -882,6 +893,32 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     });
   }, [parishId]);
 
+  /**
+   * Validation / retrait de la discipline directement depuis le classement :
+   * c'est ce critère qui bloque le plus souvent la proposition automatique.
+   */
+  const toggleDiscipline = async (reader: Reader) => {
+    const validated = reader.disciplineValidated !== true;
+    const patch: Partial<Reader> = validated
+      ? { disciplineValidated: true, disciplineValidatedAt: new Date().toISOString() }
+      : { disciplineValidated: false, disciplineValidatedAt: undefined };
+    try {
+      await updateDoc(doc(db, 'readers', reader.id), {
+        disciplineValidated: validated,
+        disciplineValidatedAt: validated ? patch.disciplineValidatedAt : null,
+      });
+      onReaderPatched(reader.id, patch);
+      toast.success(
+        validated
+          ? `${reader.prenom} ${reader.name} : discipline validée, éligibilité recalculée.`
+          : `${reader.prenom} ${reader.name} : validation discipline retirée.`,
+      );
+    } catch (e) {
+      toast.error('Validation discipline impossible.');
+      handleFirestoreError(e, OperationType.UPDATE, `readers/${reader.id}`);
+    }
+  };
+
   const toggleReader = async (massId: string, readerId: string, role: string) => {
     const p = plannings[massId];
     if (p?.isFinalized) {
@@ -890,21 +927,20 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     }
     if (p) {
       const existingAssignment = (p.assignments || []).find(a => a.role === role);
-      let newAssignments;
+      const newAssignments: ReaderAssignment[] =
+        existingAssignment?.readerId === readerId
+          ? // Même lecteur sur le même poste : on le retire.
+            (p.assignments || []).filter(a => a.role !== role)
+          : // Remplacement : un seul lecteur par poste.
+            [
+              ...(p.assignments || []).filter(a => a.role !== role),
+              { readerId, role: role as ReaderAssignment['role'] },
+            ];
 
-      if (existingAssignment?.readerId === readerId) {
-        // Unselect if same reader on same role
-        newAssignments = (p.assignments || []).filter(a => a.role !== role);
-      } else {
-        // Replace or add role assignment (ensures only one reader per role)
-        newAssignments = [
-          ...(p.assignments || []).filter(a => a.role !== role),
-          { readerId, role }
-        ];
-      }
-      
       try {
         await updateDoc(doc(db, 'plannings', p.id), { assignments: newAssignments });
+        // Mise à jour locale immédiate : l'écran ne dépend pas du retour Firestore.
+        setPlannings((prev) => ({ ...prev, [massId]: { ...p, assignments: newAssignments } }));
         toast.success("Mise à jour réussie");
       } catch (e: any) {
         toast.error("Erreur de mise à jour");
@@ -912,12 +948,19 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
       }
     } else {
       try {
-        await addDoc(collection(db, 'plannings'), {
+        const assignments: ReaderAssignment[] = [
+          { readerId, role: role as ReaderAssignment['role'] },
+        ];
+        const created = await addDoc(collection(db, 'plannings'), {
           parishId,
           massId,
-          assignments: [{ readerId, role }],
-          isFinalized: false
+          assignments,
+          isFinalized: false,
         });
+        setPlannings((prev) => ({
+          ...prev,
+          [massId]: { id: created.id, parishId, massId, assignments, isFinalized: false },
+        }));
         toast.success("Planning initialisé");
       } catch (e: any) {
         toast.error("Erreur de création");
@@ -941,6 +984,7 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     
     try {
       await updateDoc(doc(db, 'plannings', p.id), { isFinalized: !p.isFinalized });
+      setPlannings((prev) => ({ ...prev, [massId]: { ...p, isFinalized: !p.isFinalized } }));
       toast.success(!p.isFinalized ? "Planning finalisé !" : "Planning débloqué");
     } catch (e: any) {
       toast.error("Erreur de finalisation");
@@ -977,25 +1021,55 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     const proposal = proposeRanking(mass, eligibility, Object.values(plannings), masses);
 
     if (proposal.assignments.length === 0) {
-      toast.error('Aucun lecteur valide : formation, réunions et discipline doivent être validés.');
+      // Détail des blocages : c'est ce qui empêche le classement de proposer.
+      const blockers = [
+        { label: 'discipline', count: eligibility.filter((e) => e.activeOk && !e.disciplineOk).length },
+        { label: 'formation', count: eligibility.filter((e) => e.activeOk && !e.trainingOk).length },
+        { label: 'réunions', count: eligibility.filter((e) => e.activeOk && !e.meetingsOk).length },
+        { label: 'inactifs', count: eligibility.filter((e) => !e.activeOk).length },
+      ]
+        .filter((b) => b.count > 0)
+        .map((b) => `${b.count} ${b.label}`)
+        .join(', ');
+      toast.error(
+        `Aucun lecteur valide${blockers ? ` — à débloquer : ${blockers}` : ''}. ` +
+          'La discipline peut être validée directement ci-dessous.',
+        { duration: 12000 },
+      );
       return;
     }
 
     const existing = plannings[mass.id];
+    const assignments = carryOverPreparation(proposal.assignments, existing?.assignments || []);
     try {
       if (existing) {
-        await updateDoc(doc(db, 'plannings', existing.id), {
-          assignments: carryOverPreparation(proposal.assignments, existing.assignments || []),
-        });
+        await updateDoc(doc(db, 'plannings', existing.id), { assignments });
+        setPlannings((prev) => ({
+          ...prev,
+          [mass.id]: { ...existing, assignments },
+        }));
       } else {
-        await addDoc(collection(db, 'plannings'), {
+        const proposedAt = new Date().toISOString();
+        const created = await addDoc(collection(db, 'plannings'), {
           parishId,
           massId: mass.id,
-          assignments: proposal.assignments,
+          assignments,
           isFinalized: false,
-          proposedAt: new Date().toISOString(),
+          proposedAt,
           proposedBy: 'auto',
         });
+        setPlannings((prev) => ({
+          ...prev,
+          [mass.id]: {
+            id: created.id,
+            parishId,
+            massId: mass.id,
+            assignments,
+            isFinalized: false,
+            proposedAt,
+            proposedBy: 'auto',
+          },
+        }));
       }
       toast.success(
         `Classement proposé : ${proposal.assignments.length} poste(s) rempli(s), ${proposal.queued.length} lecteur(s) valides à prévoir aux prochaines messes.`,
@@ -1004,6 +1078,72 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
       toast.error("Impossible d'enregistrer le classement.");
       handleFirestoreError(e, OperationType.CREATE, 'plannings');
     }
+  };
+
+  /**
+   * Rattrapage du classement automatique : classe d'un coup toutes les messes
+   * à venir qui n'ont pas encore de planning (messe créée hors de l'app, échec
+   * réseau au moment de la création, nouveaux lecteurs validés depuis…).
+   */
+  const proposeAllMissing = async () => {
+    const missing = masses
+      .filter((m) => new Date(m.date).getTime() >= Date.now() && !plannings[m.id])
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (missing.length === 0) {
+      toast.info('Toutes les messes à venir ont déjà un classement.');
+      return;
+    }
+
+    // Planning connus mis à jour au fil des créations : la rotation reste juste.
+    const known: Record<string, Planning> = { ...plannings };
+    const queuedIds = new Set<string>();
+    let assignedTotal = 0;
+    let classified = 0;
+    let skipped = 0;
+
+    for (const mass of missing) {
+      const eligibility = evaluateEligibility(mass, readers, attendanceRecords, meetings);
+      const proposal = proposeRanking(mass, eligibility, Object.values(known), masses);
+      proposal.queued.forEach((e) => queuedIds.add(e.reader.id));
+      if (proposal.assignments.length === 0) {
+        skipped += 1;
+        continue;
+      }
+      const proposedAt = new Date().toISOString();
+      try {
+        const created = await addDoc(collection(db, 'plannings'), {
+          parishId,
+          massId: mass.id,
+          assignments: proposal.assignments,
+          isFinalized: false,
+          proposedAt,
+          proposedBy: 'auto',
+        });
+        const saved: Planning = {
+          id: created.id,
+          parishId,
+          massId: mass.id,
+          assignments: proposal.assignments,
+          isFinalized: false,
+          proposedAt,
+          proposedBy: 'auto',
+        };
+        known[mass.id] = saved;
+        setPlannings((prev) => ({ ...prev, [mass.id]: saved }));
+        assignedTotal += proposal.assignments.length;
+        classified += 1;
+      } catch (e) {
+        console.error('Classement impossible pour', mass.id, e);
+        skipped += 1;
+      }
+    }
+
+    toast.success(
+      `${classified} messe(s) classée(s) : ${assignedTotal} poste(s) attribué(s).` +
+        (skipped ? ` ${skipped} messe(s) sans lecteur valide.` : '') +
+        (queuedIds.size ? ` ${queuedIds.size} lecteur(s) valides en attente.` : ''),
+      { duration: 10000 },
+    );
   };
 
   /** Coche répétition / confession / préparation spirituelle, puis confirmation du samedi. */
@@ -1033,6 +1173,7 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
 
     try {
       await updateDoc(doc(db, 'plannings', p.id), { assignments: next });
+      setPlannings((prev) => ({ ...prev, [massId]: { ...p, assignments: next } }));
     } catch (e) {
       toast.error('Mise à jour de la préparation impossible.');
       handleFirestoreError(e, OperationType.UPDATE, `plannings/${p.id}`);
@@ -1426,6 +1567,26 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
                                 </div>
                               </div>
                             )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void toggleDiscipline(reader);
+                              }}
+                              title={
+                                reader.disciplineValidated
+                                  ? 'Validé(e) par le responsable discipline — cliquer pour retirer'
+                                  : 'Valider la discipline pour rendre ce lecteur éligible au classement'
+                              }
+                              className={`mt-1 inline-flex w-fit items-center gap-1 rounded-lg border px-2 py-1 text-[8px] font-black uppercase tracking-wider transition-colors ${
+                                reader.disciplineValidated
+                                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                                  : 'border-amber-500/40 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
+                              }`}
+                            >
+                              <ShieldCheck size={10} />
+                              {reader.disciplineValidated ? 'Discipline OK' : 'Valider la discipline'}
+                            </button>
                             {assignedElsewhere && (
                               <span className="text-[8px] text-amber-500 font-bold uppercase">Déjà assigné ailleurs</span>
                             )}
@@ -1461,7 +1622,12 @@ const PlanningView = ({ masses, readers, meetings, parishId }: { masses: Mass[],
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <PageHeader
         title="Planning des lectures"
-        description="Attribuez les rôles : commentaire, lectures et prière universelle."
+        description="Attribuez les rôles : commentateur, lectures et prière universelle."
+        actions={
+          <Button variant="secondary" className="text-xs" onClick={proposeAllMissing}>
+            <RefreshCw size={14} /> Classer les messes non planifiées
+          </Button>
+        }
       />
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1812,7 +1978,7 @@ const FeedbackView = ({ readers, masses, parishId }: { readers: Reader[], masses
   );
 };
 
-const TrainingView = ({ readers }: { readers: Reader[] }) => {
+const TrainingView = ({ readers, onReaderPatched }: { readers: Reader[]; onReaderPatched: (id: string, patch: Partial<Reader>) => void }) => {
   const MODULES = [
     { id: 'diction', name: 'Diction', description: 'Art de la diction' },
     { id: 'rythme', name: 'Rythme', description: 'Rythme de lecture' },
@@ -1836,6 +2002,7 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
         completedModules: newModules,
         trainingStatus: newStatus
       });
+      onReaderPatched(reader.id, { completedModules: newModules, trainingStatus: newStatus });
       toast.success(
         newStatus === 'completed'
           ? 'Formation validée : ce lecteur redevient éligible au classement.'
@@ -1853,10 +2020,12 @@ const TrainingView = ({ readers }: { readers: Reader[] }) => {
       'Renvoyer en formation',
     ))) return;
     try {
+      const sentAt = new Date().toISOString();
       await updateDoc(doc(db, 'readers', reader.id), {
         trainingStatus: 'in_progress',
-        sentToTrainingAt: new Date().toISOString(),
+        sentToTrainingAt: sentAt,
       });
+      onReaderPatched(reader.id, { trainingStatus: 'in_progress', sentToTrainingAt: sentAt });
       toast.success(resend ? `${reader.prenom} renvoyé(e) en formation` : `${reader.prenom} envoyé(e) en formation`);
     } catch (e) {
       toast.error('Action impossible.');
@@ -3178,10 +3347,17 @@ const MassesView = ({ masses, parishId, onRefresh, user }: { masses: Mass[], par
               .map((m) => format(parseISO(m.date), 'd MMM', { locale: fr }))
               .join(' et ')}.`
           : '';
-        toast.info(
-          `Classement automatique : ${summary.assigned} poste(s) rempli(s), ${summary.queued} lecteur(s) valides à prévoir aux prochaines messes.${meetingLabel}`,
-          { duration: 10000 },
-        );
+        if (summary.assigned === 0) {
+          toast.warning(
+            `Classement automatique : aucun lecteur valide pour l'instant (formation, réunions et discipline à valider). ${summary.queued} lecteur(s) en attente.${meetingLabel}`,
+            { duration: 12000 },
+          );
+        } else {
+          toast.info(
+            `Classement automatique : ${summary.assigned} poste(s) rempli(s), ${summary.queued} lecteur(s) valides à prévoir aux prochaines messes.${meetingLabel}`,
+            { duration: 10000 },
+          );
+        }
       } catch (error) {
         console.error(error);
         toast.warning("Messe créée, mais le classement automatique n'a pas pu être proposé. Ouvrez Planning pour le lancer.");
@@ -3504,6 +3680,7 @@ const LandingView = ({
 }) => {
   const [search, setSearch] = useState('');
   const [upcomingMasses, setUpcomingMasses] = useState<Mass[]>([]);
+  const [upcomingError, setUpcomingError] = useState(false);
   const [parishInfo, setParishInfo] = useState<Record<string, Parish>>({});
 
   useEffect(() => {
@@ -3514,11 +3691,20 @@ const LandingView = ({
       orderBy('date', 'asc'),
       limit(10)
     );
-    const unsub = onSnapshot(q, (snapshot) => {
-      const m: Mass[] = [];
-      snapshot.forEach(d => m.push({ ...d.data() as Mass, id: d.id }));
-      setUpcomingMasses(m);
-    });
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const m: Mass[] = [];
+        snapshot.forEach(d => m.push({ ...d.data() as Mass, id: d.id }));
+        setUpcomingMasses(m);
+        setUpcomingError(false);
+      },
+      (error) => {
+        // Quota Firestore épuisé ou réseau : on sort de l'état « chargement ».
+        console.warn('Horaires indisponibles :', error);
+        setUpcomingError(true);
+      },
+    );
     return unsub;
   }, []);
 
@@ -3624,7 +3810,9 @@ const LandingView = ({
                     </Button>
                   </div>
                 )) : (
-                  <p className="text-slate-600 text-center py-8 italic text-sm">Chargement des horaires...</p>
+                  <p className="text-slate-600 text-center py-8 italic text-sm">
+                    {upcomingError ? 'Horaires momentanément indisponibles.' : 'Chargement des horaires...'}
+                  </p>
                 )}
               </div>
             </motion.div>
@@ -4725,6 +4913,13 @@ export default function App() {
   const [activePlannings, setActivePlannings] = useState<Record<string, Planning>>({});
   const [activeFeedbacks, setActiveFeedbacks] = useState<Feedback[]>([]);
   const [activeExcuses, setActiveExcuses] = useState<Excuse[]>([]);
+
+  /**
+   * Applique tout de suite une modification de lecteur dans la liste affichée
+   * (discipline, formation…) : l'écran ne dépend plus du retour de Firestore.
+   */
+  const patchReader = (id: string, patch: Partial<Reader>) =>
+    setActiveReaders((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const [isDeletingParish, setIsDeletingParish] = useState<string | null>(null);
   const [isWipingAll, setIsWipingAll] = useState(false);
   const [passwordRequests, setPasswordRequests] = useState<any[]>([]);
@@ -4951,6 +5146,11 @@ export default function App() {
       setParishes(p);
     });
     return unsub;
+  }, []);
+
+  // Compteur de visiteurs du site (une visite comptée par appareil et par jour).
+  useEffect(() => {
+    void trackVisit();
   }, []);
 
   useEffect(() => {
@@ -5883,13 +6083,14 @@ export default function App() {
                       plannings={activePlannings}
                       masses={activeMasses}
                       feedbacks={activeFeedbacks}
+                      onReaderPatched={patchReader}
                     />
                   )}
                   {activeTab === 'attendance' && currentParish && (
                     <PresenceView masses={activeMasses} readers={activeReaders} parishId={currentParish.id} />
                   )}
                   {activeTab === 'planning' && currentParish && (
-                    <PlanningView masses={activeMasses} readers={activeReaders} meetings={activeMeetings} parishId={currentParish.id} />
+                    <PlanningView masses={activeMasses} readers={activeReaders} meetings={activeMeetings} parishId={currentParish.id} onReaderPatched={patchReader} />
                   )}
                   {activeTab === 'meetings' && currentParish && (
                     <MeetingView parishId={currentParish.id} />
@@ -5901,7 +6102,7 @@ export default function App() {
                     <ExcusesView excuses={activeExcuses} readers={activeReaders} />
                   )}
                   {activeTab === 'training' && currentParish && (
-                    <TrainingView readers={activeReaders} />
+                    <TrainingView readers={activeReaders} onReaderPatched={patchReader} />
                   )}
                   {activeTab === 'treasury' && currentParish && (
                     <TreasuryView readers={activeReaders} parishId={currentParish.id} />
